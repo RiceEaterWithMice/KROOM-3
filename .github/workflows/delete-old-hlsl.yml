@@ -1,0 +1,31 @@
+name: Delete old shader sources
+
+# One shot cleanup: the renderprog decls under platform/renderprogs embed the
+# full shader code, so the old .hlsl sources are no longer read by the engine.
+# Run this manually from the Actions tab, once, on the branch of your choice.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  delete-old-hlsl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Delete the old .hlsl shader sources
+        run: |
+          files=$(git ls-files '*.hlsl')
+          if [ -z "$files" ]; then
+            echo "No .hlsl files left to delete"
+            exit 0
+          fi
+          echo "$files" | xargs git rm -q --
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Delete the old .hlsl shader sources" -m "- the renderprog decls under platform/renderprogs embed the full shader code, so the .hlsl sources are no longer used by the engine"
+          git push
