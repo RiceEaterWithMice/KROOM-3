@@ -35,13 +35,13 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "RenderCommon.h"
 
-
 /*
-The OpenGL renderer resolves every shader through renderprog decls under
-platform/renderprogs; the legacy .vertex/.pixel manager below is only kept
-for the Vulkan backend.
+Both the OpenGL and the Vulkan renderers resolve every shader through
+renderprog decls under platform/renderprogs. The parts that are identical
+for both backends are implemented once for the shared idRenderProgManager_Common
+base in this file; each backend derives its own idRenderProgManager from it.
 
-The decl backed manager is adapted from the Wolfenstein: The New Order
+The decl backed managers are adapted from the Wolfenstein: The New Order
 render prog manager reconstructed under references/wolfnto-reversedengineered
 (renderprogmanager.h/.cpp). That material is decompiled proprietary code and
 is not GPL-compatible; this is a re-implementation on this engine's idlib.
@@ -49,37 +49,8 @@ The integer based API of the legacy manager is kept so the backend code does
 not change.
 */
 
-#if defined( USE_VULKAN )
-
-idRenderProgManager renderProgManager;
-
-/*
-================================================================================================
-idRenderProgManager::idRenderProgManager()
-================================================================================================
-*/
-idRenderProgManager::idRenderProgManager()
-{
-	currentRenderProgram = -1;
-	currentVertexShader = -1;
-	currentFragmentShader = -1;
-	currentDecl = nullptr;
-	currentUsesJoints = false;
-	currentOptionalSkinning = false;
-	counter = 0;
-	currentData = 0;
-	currentDescSet = 0;
-	currentParmBufferOffset = 0;
-}
-
-/*
-================================================================================================
-idRenderProgManager::~idRenderProgManager()
-================================================================================================
-*/
-idRenderProgManager::~idRenderProgManager()
-{
-}
+#include "DeclRenderProg.h"
+#include "RenderProgParm.h"
 
 /*
 ================================================================================================
@@ -102,7 +73,7 @@ static idDeclRenderProg * FindRenderProgDecl( const char * name )
 ================================================================================================
 R_ReloadShaders
 
-Drops the compiled GL programs; decl text is reloaded through the decl
+Drops the compiled programs; decl text is reloaded through the decl
 manager (reloadDecls) and the programs compile again on the next bind.
 ================================================================================================
 */
@@ -110,6 +81,136 @@ static void R_ReloadShaders( const idCmdArgs &args )
 {
 	renderProgManager.KillAllShaders();
 	renderProgManager.LoadAllShaders();
+}
+
+/*
+================================================================================================
+idRenderProgManager_Common::FindShader()
+
+Resolves a shader name plus its builtin suffix to the renderprog decl of the
+same name; the returned index only identifies the shader entry, the
+program lives in the decl.
+================================================================================================
+*/
+int idRenderProgManager_Common::FindShader( const char* name, rpStage_t stage, const char* nameOutSuffix, uint32 features, bool builtin, vertexLayoutType_t vertexLayout )
+{
+	idStr shaderName( name );
+	shaderName.StripFileExtension();
+	idStr declName( shaderName );
+	declName += nameOutSuffix;
+
+	idList<shaderEntry_t>& shaderList = ( stage == SHADER_STAGE_VERTEX ) ? vertexShaders : fragmentShaders;
+	for( int i = 0; i < shaderList.Num(); i++ )
+	{
+		if( shaderList[i].name.Icmp( declName.c_str() ) == 0 )
+		{
+			return i;
+		}
+	}
+
+	shaderEntry_t shader;
+	shader.name = declName;
+	shader.decl = FindRenderProgDecl( declName.c_str() );
+	if( shader.decl == nullptr )
+	{
+		common->Warning( "no renderprog decl for %s shader %s",
+						 ( stage == SHADER_STAGE_VERTEX ) ? "vertex" : "fragment", declName.c_str() );
+	}
+	return shaderList.Append( shader );
+}
+
+/*
+================================================================================================
+idRenderProgManager_Common::IsShaderBound()
+================================================================================================
+*/
+bool idRenderProgManager_Common::IsShaderBound() const
+{
+	return ( currentDecl != nullptr );
+}
+
+/*
+================================================================================================
+idRenderProgManager_Common::SetRenderParm()
+================================================================================================
+*/
+void idRenderProgManager_Common::SetRenderParm( renderParm_t rp, const float value[4] )
+{
+	SetUniformValue( rp, value );
+}
+
+/*
+================================================================================================
+idRenderProgManager_Common::SetRenderParms()
+================================================================================================
+*/
+void idRenderProgManager_Common::SetRenderParms( renderParm_t rp, const float values[], int num )
+{
+	for( int i = 0; i < num; i++ )
+	{
+		SetRenderParm( ( renderParm_t )( rp + i ), values + ( i * 4 ) );
+	}
+}
+
+/*
+================================================================================================
+idRenderProgManager_Common::GetGLSLParmName()
+================================================================================================
+*/
+const char* idRenderProgManager_Common::GetGLSLParmName( int rp ) const
+{
+	assert( rp >= 0 && rp < RENDERPARM_TOTAL );
+	const char * parmName = renderProgParms.GetParmNameForIndex( rp );
+	return ( parmName != nullptr ) ? parmName : "<badParmIndex>";
+}
+
+/*
+================================================================================================
+idRenderProgManager_Common::SetUniformValue()
+================================================================================================
+*/
+void idRenderProgManager_Common::SetUniformValue( const renderParm_t rp, const float value[4] )
+{
+	for( int i = 0; i < 4; i++ )
+	{
+		glslUniforms[rp][i] = value[i];
+	}
+}
+
+/*
+================================================================================================
+idRenderProgManager_Common::ZeroUniforms()
+================================================================================================
+*/
+void idRenderProgManager_Common::ZeroUniforms()
+{
+	memset( glslUniforms.Ptr(), 0, glslUniforms.Allocated() );
+}
+
+#if defined( USE_VULKAN )
+
+idRenderProgManager renderProgManager;
+
+/*
+================================================================================================
+idRenderProgManager::idRenderProgManager()
+================================================================================================
+*/
+idRenderProgManager::idRenderProgManager()
+{
+	counter = 0;
+	currentData = 0;
+	currentDescSet = 0;
+	currentParmBufferOffset = 0;
+}
+
+/*
+================================================================================================
+idRenderProgManager::~idRenderProgManager()
+================================================================================================
+*/
+idRenderProgManager::~idRenderProgManager()
+{
 }
 
 /*
@@ -400,78 +501,6 @@ void idRenderProgManager::Shutdown()
 
 /*
 ================================================================================================
-idRenderProgManager::FindShader()
-
-Resolves a shader name plus its builtin suffix to the renderprog decl of the
-same name; the returned index only identifies the shader entry, the GL
-program lives in the decl.
-================================================================================================
-*/
-int idRenderProgManager::FindShader( const char* name, rpStage_t stage, const char* nameOutSuffix, uint32 features, bool builtin, vertexLayoutType_t vertexLayout )
-{
-	idStr shaderName( name );
-	shaderName.StripFileExtension();
-	idStr declName( shaderName );
-	declName += nameOutSuffix;
-
-	idList<shaderEntry_t>& shaderList = ( stage == SHADER_STAGE_VERTEX ) ? vertexShaders : fragmentShaders;
-	for( int i = 0; i < shaderList.Num(); i++ )
-	{
-		if( shaderList[i].name.Icmp( declName.c_str() ) == 0 )
-		{
-			return i;
-		}
-	}
-
-	shaderEntry_t shader;
-	shader.name = declName;
-	shader.decl = FindRenderProgDecl( declName.c_str() );
-	if( shader.decl == nullptr )
-	{
-		common->Warning( "no renderprog decl for %s shader %s",
-						 ( stage == SHADER_STAGE_VERTEX ) ? "vertex" : "fragment", declName.c_str() );
-	}
-	return shaderList.Append( shader );
-}
-
-/*
-================================================================================================
-idRenderProgManager::IsShaderBound()
-================================================================================================
-*/
-bool idRenderProgManager::IsShaderBound() const
-{
-	return ( currentDecl != nullptr );
-}
-
-/*
-================================================================================================
-idRenderProgManager::SetRenderParms()
-================================================================================================
-*/
-void idRenderProgManager::SetRenderParms( renderParm_t rp, const float values[], int num )
-{
-	for( int i = 0; i < num; i++ )
-	{
-		SetRenderParm( ( renderParm_t )( rp + i ), values + ( i * 4 ) );
-	}
-}
-
-/*
-================================================================================================
-idRenderProgManager::SetRenderParms()
-================================================================================================
-*/
-void idRenderProgManager::SetRenderParms( renderParm_t rp, const float values[], int num )
-{
-	for( int i = 0; i < num; i++ )
-	{
-		SetRenderParm( ( renderParm_t )( rp + i ), values + ( i * 4 ) );
-	}
-}
-
-/*
-================================================================================================
 idRenderProgManager::BindDecl()
 
 Checks the decl state, uploads the Vulkan program of the current program
@@ -589,41 +618,6 @@ int idRenderProgManager::FindGLSLProgram( const char* name, int vIndex, int fInd
 	program.vertexShaderIndex = vIndex;
 	program.fragmentShaderIndex = fIndex;
 	return glslPrograms.Append( program );
-}
-
-/*
-================================================================================================
-idRenderProgManager::GetGLSLParmName()
-================================================================================================
-*/
-const char* idRenderProgManager::GetGLSLParmName( int rp ) const
-{
-	assert( rp >= 0 && rp < RENDERPARM_TOTAL );
-	const char * parmName = renderProgParms.GetParmNameForIndex( rp );
-	return ( parmName != nullptr ) ? parmName : "<badParmIndex>";
-}
-
-/*
-================================================================================================
-idRenderProgManager::SetUniformValue()
-================================================================================================
-*/
-void idRenderProgManager::SetUniformValue( const renderParm_t rp, const float value[4] )
-{
-	for( int i = 0; i < 4; i++ )
-	{
-		glslUniforms[rp][i] = value[i];
-	}
-}
-
-/*
-================================================================================================
-idRenderProgManager::ZeroUniforms()
-================================================================================================
-*/
-void idRenderProgManager::ZeroUniforms()
-{
-	memset( glslUniforms.Ptr(), 0, glslUniforms.Allocated() );
 }
 
 /*
@@ -917,21 +911,6 @@ void RpPrintState( uint64 stateBits )
 }
 
 #else
-/*
-The OpenGL renderer resolves every shader through renderprog decls under
-platform/renderprogs; the legacy .vertex/.pixel manager is not compiled.
-
-The decl backed manager is adapted from the Wolfenstein: The New Order
-render prog manager reconstructed under references/wolfnto-reversedengineered
-(renderprogmanager.h/.cpp). That material is decompiled proprietary code and
-is not GPL-compatible; this is a re-implementation on this engine's idlib.
-The integer based API of the legacy .vertex/.pixel manager is kept so the
-backend code does not change; every shader resolves to an idDeclRenderProg
-decl that owns the generated GLSL and the linked GL program.
-*/
-
-#include "DeclRenderProg.h"
-#include "RenderProgParm.h"
 
 idRenderProgManager renderProgManager;
 
@@ -942,12 +921,6 @@ idRenderProgManager::idRenderProgManager()
 */
 idRenderProgManager::idRenderProgManager()
 {
-	currentRenderProgram = -1;
-	currentVertexShader = -1;
-	currentFragmentShader = -1;
-	currentDecl = nullptr;
-	currentUsesJoints = false;
-	currentOptionalSkinning = false;
 }
 
 /*
@@ -957,37 +930,6 @@ idRenderProgManager::~idRenderProgManager()
 */
 idRenderProgManager::~idRenderProgManager()
 {
-}
-
-/*
-================================================================================================
-FindRenderProgDecl
-
-Resolves a shader name with its builtin suffix to the renderprog decl that
-implements it.
-================================================================================================
-*/
-static idDeclRenderProg * FindRenderProgDecl( const char * name )
-{
-	idStr declName( name );
-	declName.StripFileExtension();
-	const idDeclRenderProg * decl = static_cast< const idDeclRenderProg * >(
-		declManager->FindType( DECL_RENDERPROG, declName.c_str(), false ) );
-	return const_cast< idDeclRenderProg * >( decl );
-}
-
-/*
-================================================================================================
-R_ReloadShaders
-
-Drops the compiled GL programs; decl text is reloaded through the decl
-manager (reloadDecls) and the programs compile again on the next bind.
-================================================================================================
-*/
-static void R_ReloadShaders( const idCmdArgs &args )
-{
-	renderProgManager.KillAllShaders();
-	renderProgManager.LoadAllShaders();
 }
 
 /*
@@ -1245,75 +1187,6 @@ void idRenderProgManager::Shutdown()
 
 /*
 ================================================================================================
-idRenderProgManager::FindShader()
-
-Resolves a shader name plus its builtin suffix to the renderprog decl of the
-same name; the returned index only identifies the shader entry, the GL
-program lives in the decl.
-================================================================================================
-*/
-int idRenderProgManager::FindShader( const char* name, rpStage_t stage, const char* nameOutSuffix, uint32 features, bool builtin, vertexLayoutType_t vertexLayout )
-{
-	idStr shaderName( name );
-	shaderName.StripFileExtension();
-	idStr declName( shaderName );
-	declName += nameOutSuffix;
-
-	idList<shaderEntry_t>& shaderList = ( stage == SHADER_STAGE_VERTEX ) ? vertexShaders : fragmentShaders;
-	for( int i = 0; i < shaderList.Num(); i++ )
-	{
-		if( shaderList[i].name.Icmp( declName.c_str() ) == 0 )
-		{
-			return i;
-		}
-	}
-
-	shaderEntry_t shader;
-	shader.name = declName;
-	shader.decl = FindRenderProgDecl( declName.c_str() );
-	if( shader.decl == nullptr )
-	{
-		common->Warning( "no renderprog decl for %s shader %s",
-						 ( stage == SHADER_STAGE_VERTEX ) ? "vertex" : "fragment", declName.c_str() );
-	}
-	return shaderList.Append( shader );
-}
-
-/*
-================================================================================================
-idRenderProgManager::IsShaderBound()
-================================================================================================
-*/
-bool idRenderProgManager::IsShaderBound() const
-{
-	return ( currentDecl != nullptr );
-}
-
-/*
-================================================================================================
-idRenderProgManager::SetRenderParms()
-================================================================================================
-*/
-void idRenderProgManager::SetRenderParms( renderParm_t rp, const float values[], int num )
-{
-	for( int i = 0; i < num; i++ )
-	{
-		SetRenderParm( ( renderParm_t )( rp + i ), values + ( i * 4 ) );
-	}
-}
-
-/*
-================================================================================================
-idRenderProgManager::SetRenderParm()
-================================================================================================
-*/
-void idRenderProgManager::SetRenderParm( renderParm_t rp, const float value[4] )
-{
-	SetUniformValue( rp, value );
-}
-
-/*
-================================================================================================
 idRenderProgManager::FindGLSLProgram()
 ================================================================================================
 */
@@ -1444,31 +1317,6 @@ void idRenderProgManager::Unbind()
 
 /*
 ================================================================================================
-idRenderProgManager::GetGLSLParmName()
-================================================================================================
-*/
-const char* idRenderProgManager::GetGLSLParmName( int rp ) const
-{
-	assert( rp >= 0 && rp < RENDERPARM_TOTAL );
-	const char * parmName = renderProgParms.GetParmNameForIndex( rp );
-	return ( parmName != nullptr ) ? parmName : "<badParmIndex>";
-}
-
-/*
-================================================================================================
-idRenderProgManager::SetUniformValue()
-================================================================================================
-*/
-void idRenderProgManager::SetUniformValue( const renderParm_t rp, const float value[4] )
-{
-	for( int i = 0; i < 4; i++ )
-	{
-		glslUniforms[rp][i] = value[i];
-	}
-}
-
-/*
-================================================================================================
 idRenderProgManager::CommitUniforms()
 
 The decl stores the GL uniform location + 1 for every parm of its vertex
@@ -1520,16 +1368,6 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 			}
 		}
 	}
-}
-
-/*
-================================================================================================
-idRenderProgManager::ZeroUniforms()
-================================================================================================
-*/
-void idRenderProgManager::ZeroUniforms()
-{
-	memset( glslUniforms.Ptr(), 0, glslUniforms.Allocated() );
 }
 
 #endif // !USE_VULKAN

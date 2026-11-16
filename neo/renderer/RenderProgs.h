@@ -241,10 +241,13 @@ struct attribInfo_t
 };
 
 extern attribInfo_t attribsPC[];
+
 /*
 Both the OpenGL and the Vulkan renderer resolve every shader through
-renderprog decls under platform/renderprogs; each backend gets its own decl
-backed idRenderProgManager below.
+renderprog decls under platform/renderprogs. The parts that are identical
+for both backends live in the shared idRenderProgManager_Common base below;
+each backend derives its own idRenderProgManager from it and adds its own
+program state.
 
 The decl backed managers are adapted from the Wolfenstein: The New Order
 render prog manager reconstructed under references/wolfnto-reversedengineered
@@ -253,39 +256,40 @@ is not GPL-compatible; this is a re-implementation on this engine's idlib.
 The integer based API of the legacy manager is kept so the backend code does
 not change.
 */
-#if defined( USE_VULKAN )
 
 class idDeclRenderProg;
 
 /*
 ================================================================================================
-idRenderProgManager
+idRenderProgManager_Common
 
-Decl backed manager for the Vulkan renderer, matching the OpenGL manager.
-Every builtin resolves to the renderprog decl of the same name; the decl's
-generated GLSL is converted to UBO based Vulkan GLSL, compiled to SPIR-V
-with shaderc, and the shader modules plus the descriptor set and pipeline
-layouts are derived from the decl's parm lists. The legacy .vertex/.pixel
-manager and its Cg conversion pipeline are gone.
+Shared base of the two decl backed render prog managers. Holds the builtin
+shader table with its BindShader_* wrappers, the shader feature macros, the
+render parm value pool, and the cached state of the currently bound decl.
 ================================================================================================
 */
-class idRenderProgManager
+class idRenderProgManager_Common
 {
 public:
-	idRenderProgManager();
-	virtual ~idRenderProgManager();
+	idRenderProgManager_Common()
+	{
+		currentRenderProgram = -1;
+		currentVertexShader = -1;
+		currentFragmentShader = -1;
+		currentDecl = nullptr;
+		currentUsesJoints = false;
+		currentOptionalSkinning = false;
+	}
+	virtual ~idRenderProgManager_Common() {}
 
-	void	Init();
-	void	Shutdown();
+	// binds the GL program or uploads the Vulkan state behind a builtin
+	// entry; implemented by each backend
+	virtual void	BindProgram( int progIndex ) = 0;
 
-	void	StartFrame();
-
-	void	SetRenderParm( renderParm_t rp, const float value[4] );
-	void	SetRenderParms( renderParm_t rp, const float values[], int numValues );
-
-	int		FindShader( const char* name, rpStage_t stage, const char* nameOutSuffix, uint32 features, bool builtin, vertexLayoutType_t vertexLayout = LAYOUT_DRAW_VERT );
-
-	void	BindProgram( int progIndex );
+	void	BindShader_Builtin( int i )
+	{
+		BindProgram( builtinShaders[i] );
+	}
 	void	BindShader_GUI( )
 	{
 		BindShader_Builtin( BUILTIN_GUI );
@@ -729,7 +733,6 @@ public:
 	}
 	// RB end
 
-
 	// the joints buffer should only be bound for vertex programs that use joints
 	bool		ShaderUsesJoints() const
 	{
@@ -741,29 +744,21 @@ public:
 		return currentOptionalSkinning;
 	}
 
-	// unbind the currently bound render program
-	void		Unbind();
-
 	// RB begin
 	bool		IsShaderBound() const;
 	// RB end
 
-	// this should only be called via the reload shader console command
-	void		LoadAllShaders();
-	void		KillAllShaders();
+	void		SetRenderParm( renderParm_t rp, const float value[4] );
+	void		SetRenderParms( renderParm_t rp, const float values[], int numValues );
+
+	int			FindShader( const char* name, rpStage_t stage, const char* nameOutSuffix, uint32 features, bool builtin, vertexLayoutType_t vertexLayout = LAYOUT_DRAW_VERT );
 
 	const char*	GetGLSLParmName( int rp ) const;
 
 	void		SetUniformValue( const renderParm_t rp, const float value[4] );
-	void		CommitUniforms( uint64 stateBits );
-	void		CachePipeline( uint64 stateBits );
-	int			FindGLSLProgram( const char* name, int vIndex, int fIndex );
 	void		ZeroUniforms();
 
-	void		PrintPipelines();
-	void		ClearPipelines();
-
-private:
+protected:
 	// a legacy shader name (builtin table entry plus suffix) mapped to the
 	// renderprog decl that implements it
 	struct shaderEntry_t
@@ -772,6 +767,192 @@ private:
 		idDeclRenderProg* decl;
 	};
 
+	enum
+	{
+		BUILTIN_GUI,
+		BUILTIN_COLOR,
+		// RB begin
+		BUILTIN_COLOR_SKINNED,
+		BUILTIN_VERTEX_COLOR,
+		BUILTIN_AMBIENT_LIGHTING,
+		BUILTIN_AMBIENT_LIGHTING_SKINNED,
+
+		BUILTIN_AMBIENT_LIGHTING_IBL,
+		BUILTIN_AMBIENT_LIGHTING_IBL_SKINNED,
+		BUILTIN_AMBIENT_LIGHTING_IBL_PBR,
+		BUILTIN_AMBIENT_LIGHTING_IBL_PBR_SKINNED,
+
+		BUILTIN_AMBIENT_LIGHTGRID_IBL,
+		BUILTIN_AMBIENT_LIGHTGRID_IBL_SKINNED,
+		BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR,
+		BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR_SKINNED,
+
+		BUILTIN_SMALL_GEOMETRY_BUFFER,
+		BUILTIN_SMALL_GEOMETRY_BUFFER_SKINNED,
+		// RB end
+		BUILTIN_TEXTURED,
+		BUILTIN_TEXTURE_VERTEXCOLOR,
+		BUILTIN_TEXTURE_VERTEXCOLOR_SRGB,
+		BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED,
+		BUILTIN_TEXTURE_VERTEXCOLOR_SOFT,
+		BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED_SOFT,
+		BUILTIN_TEXTURE_TEXGEN_VERTEXCOLOR,
+		BUILTIN_INTERACTION,
+		BUILTIN_INTERACTION_SKINNED,
+		BUILTIN_INTERACTION_AMBIENT,
+		BUILTIN_INTERACTION_AMBIENT_SKINNED,
+		// RB begin
+		BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT,
+		BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED,
+		BUILTIN_INTERACTION_SHADOW_MAPPING_POINT,
+		BUILTIN_INTERACTION_SHADOW_MAPPING_POINT_SKINNED,
+		BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL,
+		BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED,
+
+		BUILTIN_PBR_INTERACTION,
+		BUILTIN_PBR_INTERACTION_SKINNED,
+		BUILTIN_PBR_INTERACTION_AMBIENT,
+		BUILTIN_PBR_INTERACTION_AMBIENT_SKINNED,
+
+		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT,
+		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED,
+		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT,
+		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT_SKINNED,
+		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL,
+		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED,
+
+		BUILTIN_DEBUG_LIGHTGRID,
+		BUILTIN_DEBUG_LIGHTGRID_SKINNED,
+
+		BUILTIN_DEBUG_OCTAHEDRON,
+		BUILTIN_DEBUG_OCTAHEDRON_SKINNED,
+		// RB end
+		BUILTIN_ENVIRONMENT,
+		BUILTIN_ENVIRONMENT_SKINNED,
+		BUILTIN_BUMPY_ENVIRONMENT,
+		BUILTIN_BUMPY_ENVIRONMENT_SKINNED,
+
+		BUILTIN_DEPTH,
+		BUILTIN_DEPTH_SKINNED,
+
+		BUILTIN_BLENDLIGHT,
+		BUILTIN_FOG,
+		BUILTIN_FOG_SKINNED,
+		BUILTIN_DIFFUSE_CUBE,
+		BUILTIN_SKYBOX,
+		BUILTIN_WOBBLESKY,
+		BUILTIN_ATMOS_SKY,
+		BUILTIN_ATMOS_SKY_CUBE,
+		BUILTIN_GLASSWARP,
+		BUILTIN_POSTPROCESS,
+		// RB begin
+		BUILTIN_SCREEN,
+		BUILTIN_TONEMAP,
+		BUILTIN_BRIGHTPASS,
+		BUILTIN_HDR_GLARE_CHROMATIC,
+		BUILTIN_HDR_DEBUG,
+
+		BUILTIN_SMAA_EDGE_DETECTION,
+		BUILTIN_SMAA_BLENDING_WEIGHT_CALCULATION,
+		BUILTIN_SMAA_NEIGHBORHOOD_BLENDING,
+
+		BUILTIN_AMBIENT_OCCLUSION,
+		BUILTIN_AMBIENT_OCCLUSION_AND_OUTPUT,
+		BUILTIN_AMBIENT_OCCLUSION_BLUR,
+		BUILTIN_AMBIENT_OCCLUSION_BLUR_AND_OUTPUT,
+		BUILTIN_AMBIENT_OCCLUSION_MINIFY,
+		BUILTIN_AMBIENT_OCCLUSION_RECONSTRUCT_CSZ,
+
+		BUILTIN_DEEP_GBUFFER_RADIOSITY_SSGI,
+		BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR,
+		BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR_AND_OUTPUT,
+		// RB end
+		BUILTIN_BINK,
+		BUILTIN_BINK_SRGB,	// SRS - Added Bink shader without sRGB to linear conversion for testVideo cmd
+		BUILTIN_BINK_GUI,
+		BUILTIN_MOTION_BLUR,
+
+		BUILTIN_DEBUG_SHADOWMAP,
+
+		MAX_BUILTINS
+	};
+	int builtinShaders[MAX_BUILTINS];
+	void BindShader_Builtin( int i )
+	{
+		BindProgram( builtinShaders[i] );
+	}
+
+	enum shaderFeature_t
+	{
+		USE_GPU_SKINNING,
+		LIGHT_POINT,
+		LIGHT_PARALLEL,
+		BRIGHTPASS,
+		HDR_DEBUG,
+		USE_SRGB,
+		USE_PBR,
+		USE_SOFT_PARTICLE,
+
+		MAX_SHADER_MACRO_NAMES,
+	};
+
+	int		currentRenderProgram;
+	int		currentVertexShader;
+	int		currentFragmentShader;
+	idList<shaderEntry_t, TAG_RENDER>		vertexShaders;
+	idList<shaderEntry_t, TAG_RENDER>		fragmentShaders;
+	idStaticList< idVec4, RENDERPARM_TOTAL >	glslUniforms;
+
+	// cached state of the currently bound decl; the per-shader tables of the
+	// legacy manager are gone so the joint and skinning queries read these
+	// copies instead
+	idDeclRenderProg*	currentDecl;
+	bool	currentUsesJoints;
+	bool	currentOptionalSkinning;
+};
+
+#if defined( USE_VULKAN )
+
+/*
+================================================================================================
+idRenderProgManager
+
+Decl backed manager for the Vulkan renderer, matching the OpenGL manager.
+Every builtin resolves to the renderprog decl of the same name; the decl's
+generated GLSL is converted to UBO based Vulkan GLSL, compiled to SPIR-V
+with shaderc, and the shader modules plus the descriptor set and pipeline
+layouts are derived from the decl's parm lists. The legacy .vertex/.pixel
+manager and its Cg conversion pipeline are gone.
+================================================================================================
+*/
+class idRenderProgManager : public idRenderProgManager_Common
+{
+public:
+	idRenderProgManager();
+	~idRenderProgManager();
+
+	void	Init();
+	void	Shutdown();
+
+	void	StartFrame();
+
+	void	BindProgram( int progIndex );
+
+	// unbind the currently bound render program
+	void	Unbind();
+
+	// this should only be called via the reload shader console command
+	void	LoadAllShaders();
+	void	KillAllShaders();
+
+	void	CommitUniforms( uint64 stateBits );
+	void	CachePipeline( uint64 stateBits );
+	int		FindGLSLProgram( const char* name, int vIndex, int fIndex );
+
+	void	PrintPipelines();
+	void	ClearPipelines();
+
+private:
 	// a linked pair of a vertex and a fragment shader plus the Vulkan state
 	// uploaded from the decl; the modules, layouts, and pipelines are built
 	// by UploadDeclProgram and rebuilt when the decl data changes
@@ -845,150 +1026,7 @@ private:
 
 	VkPipeline GetPipeline( programEntry_t & program, uint64 stateBits );
 
-	enum
-	{
-		BUILTIN_GUI,
-		BUILTIN_COLOR,
-		// RB begin
-		BUILTIN_COLOR_SKINNED,
-		BUILTIN_VERTEX_COLOR,
-		BUILTIN_AMBIENT_LIGHTING,
-		BUILTIN_AMBIENT_LIGHTING_SKINNED,
-
-		BUILTIN_AMBIENT_LIGHTING_IBL,
-		BUILTIN_AMBIENT_LIGHTING_IBL_SKINNED,
-		BUILTIN_AMBIENT_LIGHTING_IBL_PBR,
-		BUILTIN_AMBIENT_LIGHTING_IBL_PBR_SKINNED,
-
-		BUILTIN_AMBIENT_LIGHTGRID_IBL,
-		BUILTIN_AMBIENT_LIGHTGRID_IBL_SKINNED,
-		BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR,
-		BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR_SKINNED,
-
-		BUILTIN_SMALL_GEOMETRY_BUFFER,
-		BUILTIN_SMALL_GEOMETRY_BUFFER_SKINNED,
-		// RB end
-		BUILTIN_TEXTURED,
-		BUILTIN_TEXTURE_VERTEXCOLOR,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SRGB,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SOFT,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED_SOFT,
-		BUILTIN_TEXTURE_TEXGEN_VERTEXCOLOR,
-		BUILTIN_INTERACTION,
-		BUILTIN_INTERACTION_SKINNED,
-		BUILTIN_INTERACTION_AMBIENT,
-		BUILTIN_INTERACTION_AMBIENT_SKINNED,
-		// RB begin
-		BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_POINT,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_POINT_SKINNED,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED,
-
-		BUILTIN_PBR_INTERACTION,
-		BUILTIN_PBR_INTERACTION_SKINNED,
-		BUILTIN_PBR_INTERACTION_AMBIENT,
-		BUILTIN_PBR_INTERACTION_AMBIENT_SKINNED,
-
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT_SKINNED,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED,
-
-		BUILTIN_DEBUG_LIGHTGRID,
-		BUILTIN_DEBUG_LIGHTGRID_SKINNED,
-
-		BUILTIN_DEBUG_OCTAHEDRON,
-		BUILTIN_DEBUG_OCTAHEDRON_SKINNED,
-		// RB end
-		BUILTIN_ENVIRONMENT,
-		BUILTIN_ENVIRONMENT_SKINNED,
-		BUILTIN_BUMPY_ENVIRONMENT,
-		BUILTIN_BUMPY_ENVIRONMENT_SKINNED,
-
-		BUILTIN_DEPTH,
-		BUILTIN_DEPTH_SKINNED,
-
-		BUILTIN_BLENDLIGHT,
-		BUILTIN_FOG,
-		BUILTIN_FOG_SKINNED,
-		BUILTIN_DIFFUSE_CUBE,
-		BUILTIN_SKYBOX,
-		BUILTIN_WOBBLESKY,
-		BUILTIN_ATMOS_SKY,
-		BUILTIN_ATMOS_SKY_CUBE,
-		BUILTIN_GLASSWARP,
-		BUILTIN_POSTPROCESS,
-		// RB begin
-		BUILTIN_SCREEN,
-		BUILTIN_TONEMAP,
-		BUILTIN_BRIGHTPASS,
-		BUILTIN_HDR_GLARE_CHROMATIC,
-		BUILTIN_HDR_DEBUG,
-
-		BUILTIN_SMAA_EDGE_DETECTION,
-		BUILTIN_SMAA_BLENDING_WEIGHT_CALCULATION,
-		BUILTIN_SMAA_NEIGHBORHOOD_BLENDING,
-
-		BUILTIN_AMBIENT_OCCLUSION,
-		BUILTIN_AMBIENT_OCCLUSION_AND_OUTPUT,
-		BUILTIN_AMBIENT_OCCLUSION_BLUR,
-		BUILTIN_AMBIENT_OCCLUSION_BLUR_AND_OUTPUT,
-		BUILTIN_AMBIENT_OCCLUSION_MINIFY,
-		BUILTIN_AMBIENT_OCCLUSION_RECONSTRUCT_CSZ,
-
-		BUILTIN_DEEP_GBUFFER_RADIOSITY_SSGI,
-		BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR,
-		BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR_AND_OUTPUT,
-		// RB end
-		BUILTIN_BINK,
-		BUILTIN_BINK_SRGB,	// SRS - Added Bink shader without sRGB to linear conversion for testVideo cmd
-		BUILTIN_BINK_GUI,
-		BUILTIN_MOTION_BLUR,
-
-		BUILTIN_DEBUG_SHADOWMAP,
-
-		MAX_BUILTINS
-	};
-	int builtinShaders[MAX_BUILTINS];
-	void BindShader_Builtin( int i )
-	{
-		BindProgram( builtinShaders[i] );
-	}
-
-	enum shaderFeature_t
-	{
-		USE_GPU_SKINNING,
-		LIGHT_POINT,
-		LIGHT_PARALLEL,
-		BRIGHTPASS,
-		HDR_DEBUG,
-		USE_SRGB,
-		USE_PBR,
-		USE_SOFT_PARTICLE,
-
-		MAX_SHADER_MACRO_NAMES,
-	};
-
-	int		currentRenderProgram;
 	idList<programEntry_t, TAG_RENDER>		glslPrograms;
-	idStaticList< idVec4, RENDERPARM_TOTAL >	glslUniforms;
-
-	int		currentVertexShader;
-	int		currentFragmentShader;
-	idList<shaderEntry_t, TAG_RENDER>		vertexShaders;
-	idList<shaderEntry_t, TAG_RENDER>		fragmentShaders;
-
-	// cached state of the currently bound decl; the per-shader tables of the
-	// legacy manager are gone so the joint and skinning queries read these
-	// copies instead
-	idDeclRenderProg*	currentDecl;
-	bool	currentUsesJoints;
-	bool	currentOptionalSkinning;
 
 	// per frame descriptor set machinery
 	int					counter;
@@ -999,12 +1037,10 @@ private:
 	VkDescriptorSet		descriptorSets[ NUM_FRAME_DATA ][ MAX_DESC_SETS ];
 
 	idUniformBuffer* 	parmBuffers[ NUM_FRAME_DATA ];
+
 };
 
-
 #else
-
-class idDeclRenderProg;
 
 /*
 ================================================================================================
@@ -1013,504 +1049,30 @@ idRenderProgManager
 Decl backed manager for the OpenGL renderer.
 ================================================================================================
 */
-class idRenderProgManager
+class idRenderProgManager : public idRenderProgManager_Common
 {
 public:
 	idRenderProgManager();
-	virtual ~idRenderProgManager();
+	~idRenderProgManager();
 
 	void	Init();
 	void	Shutdown();
 
 	void	StartFrame();
 
-	void	SetRenderParm( renderParm_t rp, const float value[4] );
-	void	SetRenderParms( renderParm_t rp, const float values[], int numValues );
-
-	int		FindShader( const char* name, rpStage_t stage, const char* nameOutSuffix, uint32 features, bool builtin, vertexLayoutType_t vertexLayout = LAYOUT_DRAW_VERT );
-
 	void	BindProgram( int progIndex );
-	void	BindShader_GUI( )
-	{
-		BindShader_Builtin( BUILTIN_GUI );
-	}
-
-	void	BindShader_Color( )
-	{
-		BindShader_Builtin( BUILTIN_COLOR );
-	}
-
-	// RB begin
-	void	BindShader_ColorSkinned( )
-	{
-		BindShader_Builtin( BUILTIN_COLOR_SKINNED );
-	}
-
-	void	BindShader_VertexColor( )
-	{
-		BindShader_Builtin( BUILTIN_VERTEX_COLOR );
-	}
-
-	void	BindShader_AmbientLighting()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTING );
-	}
-
-	void	BindShader_AmbientLightingSkinned()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTING_SKINNED );
-	}
-
-	void	BindShader_ImageBasedLighting()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTING_IBL );
-	}
-
-	void	BindShader_ImageBasedLightingSkinned()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTING_IBL_SKINNED );
-	}
-
-	void	BindShader_ImageBasedLighting_PBR()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTING_IBL_PBR );
-	}
-
-	void	BindShader_ImageBasedLightingSkinned_PBR()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTING_IBL_PBR_SKINNED );
-	}
-
-
-	void	BindShader_ImageBasedLightGrid()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTGRID_IBL );
-	}
-
-	void	BindShader_ImageBasedLightGridSkinned()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTGRID_IBL_SKINNED );
-	}
-
-	void	BindShader_ImageBasedLightGrid_PBR()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR );
-	}
-
-	void	BindShader_ImageBasedLightGridSkinned_PBR()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR_SKINNED );
-	}
-
-
-	void	BindShader_SmallGeometryBuffer()
-	{
-		BindShader_Builtin( BUILTIN_SMALL_GEOMETRY_BUFFER );
-	}
-
-	void	BindShader_SmallGeometryBufferSkinned()
-	{
-		BindShader_Builtin( BUILTIN_SMALL_GEOMETRY_BUFFER_SKINNED );
-	}
-	// RB end
-
-	void	BindShader_Texture( )
-	{
-		BindShader_Builtin( BUILTIN_TEXTURED );
-	}
-
-	void	BindShader_TextureVertexColor()
-	{
-		BindShader_Builtin( BUILTIN_TEXTURE_VERTEXCOLOR );
-	}
-
-	void	BindShader_TextureVertexColor_sRGB()
-	{
-		BindShader_Builtin( BUILTIN_TEXTURE_VERTEXCOLOR_SRGB );
-	}
-
-	void	BindShader_TextureVertexColorSkinned()
-	{
-		BindShader_Builtin( BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED );
-	}
-
-	void	BindShader_TextureVertexColorSoft()
-	{
-		BindShader_Builtin( BUILTIN_TEXTURE_VERTEXCOLOR_SOFT );
-	}
-
-	void	BindShader_TextureVertexColorSkinnedSoft()
-	{
-		BindShader_Builtin( BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED_SOFT );
-	}
-
-	void	BindShader_TextureTexGenVertexColor()
-	{
-		BindShader_Builtin( BUILTIN_TEXTURE_TEXGEN_VERTEXCOLOR );
-	}
-
-	void	BindShader_Interaction()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION );
-	}
-
-	void	BindShader_InteractionSkinned()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_SKINNED );
-	}
-
-	void	BindShader_InteractionAmbient()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_AMBIENT );
-	}
-
-	void	BindShader_InteractionAmbientSkinned()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_AMBIENT_SKINNED );
-	}
-
-	// RB begin
-	void	BindShader_Interaction_ShadowMapping_Spot()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT );
-	}
-
-	void	BindShader_Interaction_ShadowMapping_Spot_Skinned()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED );
-	}
-
-	void	BindShader_Interaction_ShadowMapping_Point()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_SHADOW_MAPPING_POINT );
-	}
-
-	void	BindShader_Interaction_ShadowMapping_Point_Skinned()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_SHADOW_MAPPING_POINT_SKINNED );
-	}
-
-	void	BindShader_Interaction_ShadowMapping_Parallel()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL );
-	}
-
-	void	BindShader_Interaction_ShadowMapping_Parallel_Skinned()
-	{
-		BindShader_Builtin( BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED );
-	}
-
-	// PBR variantes
-
-	void	BindShader_PBR_Interaction()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION );
-	}
-
-	void	BindShader_PBR_InteractionSkinned()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_SKINNED );
-	}
-
-	void	BindShader_PBR_InteractionAmbient()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_AMBIENT );
-	}
-
-	void	BindShader_PBR_InteractionAmbientSkinned()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_AMBIENT_SKINNED );
-	}
-
-	// RB begin
-	void	BindShader_PBR_Interaction_ShadowMapping_Spot()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT );
-	}
-
-	void	BindShader_PBR_Interaction_ShadowMapping_Spot_Skinned()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED );
-	}
-
-	void	BindShader_PBR_Interaction_ShadowMapping_Point()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT );
-	}
-
-	void	BindShader_PBR_Interaction_ShadowMapping_Point_Skinned()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT_SKINNED );
-	}
-
-	void	BindShader_PBR_Interaction_ShadowMapping_Parallel()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL );
-	}
-
-	void	BindShader_PBR_Interaction_ShadowMapping_Parallel_Skinned()
-	{
-		BindShader_Builtin( BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED );
-	}
-
-	void	BindShader_DebugLightGrid()
-	{
-		BindShader_Builtin( BUILTIN_DEBUG_LIGHTGRID );
-	}
-
-	void	BindShader_DebugLightGridSkinned()
-	{
-		BindShader_Builtin( BUILTIN_DEBUG_LIGHTGRID_SKINNED );
-	}
-
-	void	BindShader_DebugOctahedron()
-	{
-		BindShader_Builtin( BUILTIN_DEBUG_OCTAHEDRON );
-	}
-
-	void	BindShader_DebugOctahedronSkinned()
-	{
-		BindShader_Builtin( BUILTIN_DEBUG_OCTAHEDRON_SKINNED );
-	}
-	// RB end
-
-	void	BindShader_Environment()
-	{
-		BindShader_Builtin( BUILTIN_ENVIRONMENT );
-	}
-
-	void	BindShader_EnvironmentSkinned()
-	{
-		BindShader_Builtin( BUILTIN_ENVIRONMENT_SKINNED );
-	}
-
-	void	BindShader_BumpyEnvironment()
-	{
-		BindShader_Builtin( BUILTIN_BUMPY_ENVIRONMENT );
-	}
-
-	void	BindShader_BumpyEnvironmentSkinned()
-	{
-		BindShader_Builtin( BUILTIN_BUMPY_ENVIRONMENT_SKINNED );
-	}
-
-	void	BindShader_Depth()
-	{
-		BindShader_Builtin( BUILTIN_DEPTH );
-	}
-
-	void	BindShader_DepthSkinned()
-	{
-		BindShader_Builtin( BUILTIN_DEPTH_SKINNED );
-	}
-
-	void	BindShader_BlendLight()
-	{
-		BindShader_Builtin( BUILTIN_BLENDLIGHT );
-	}
-
-	void	BindShader_Fog()
-	{
-		BindShader_Builtin( BUILTIN_FOG );
-	}
-
-	void	BindShader_FogSkinned()
-	{
-		BindShader_Builtin( BUILTIN_FOG_SKINNED );
-	}
-
-	void	BindShader_DiffuseCube()
-	{
-		BindShader_Builtin( BUILTIN_DIFFUSE_CUBE );
-	}
-
-	void	BindShader_SkyBox()
-	{
-		BindShader_Builtin( BUILTIN_SKYBOX );
-	}
-
-	void	BindShader_AtmosSky()
-	{
-		BindShader_Builtin( BUILTIN_ATMOS_SKY );
-	}
-
-	void	BindShader_AtmosSkyCube()
-	{
-		BindShader_Builtin( BUILTIN_ATMOS_SKY_CUBE );
-	}
-
-	void	BindShader_WobbleSky()
-	{
-		BindShader_Builtin( BUILTIN_WOBBLESKY );
-	}
-
-	void	BindShader_GlassWarp()
-	{
-		BindShader_Builtin( BUILTIN_GLASSWARP );
-	}
-
-	void	BindShader_PostProcess()
-	{
-		BindShader_Builtin( BUILTIN_POSTPROCESS );
-	}
-
-	void	BindShader_Screen()
-	{
-		BindShader_Builtin( BUILTIN_SCREEN );
-	}
-
-	void	BindShader_Tonemap()
-	{
-		BindShader_Builtin( BUILTIN_TONEMAP );
-	}
-
-	void	BindShader_Brightpass()
-	{
-		BindShader_Builtin( BUILTIN_BRIGHTPASS );
-	}
-
-	void	BindShader_HDRGlareChromatic()
-	{
-		BindShader_Builtin( BUILTIN_HDR_GLARE_CHROMATIC );
-	}
-
-	void	BindShader_HDRDebug()
-	{
-		BindShader_Builtin( BUILTIN_HDR_DEBUG );
-	}
-
-	void	BindShader_SMAA_EdgeDetection()
-	{
-		BindShader_Builtin( BUILTIN_SMAA_EDGE_DETECTION );
-	}
-
-	void	BindShader_SMAA_BlendingWeightCalculation()
-	{
-		BindShader_Builtin( BUILTIN_SMAA_BLENDING_WEIGHT_CALCULATION );
-	}
-
-	void	BindShader_SMAA_NeighborhoodBlending()
-	{
-		BindShader_Builtin( BUILTIN_SMAA_NEIGHBORHOOD_BLENDING );
-	}
-
-	void	BindShader_AmbientOcclusion()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_OCCLUSION );
-	}
-
-	void	BindShader_AmbientOcclusionAndOutput()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_OCCLUSION_AND_OUTPUT );
-	}
-
-	void	BindShader_AmbientOcclusionBlur()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_OCCLUSION_BLUR );
-	}
-
-	void	BindShader_AmbientOcclusionBlurAndOutput()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_OCCLUSION_BLUR_AND_OUTPUT );
-	}
-
-	void	BindShader_AmbientOcclusionMinify()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_OCCLUSION_MINIFY );
-	}
-
-	void	BindShader_AmbientOcclusionReconstructCSZ()
-	{
-		BindShader_Builtin( BUILTIN_AMBIENT_OCCLUSION_RECONSTRUCT_CSZ );
-	}
-
-	void	BindShader_DeepGBufferRadiosity()
-	{
-		BindShader_Builtin( BUILTIN_DEEP_GBUFFER_RADIOSITY_SSGI );
-	}
-
-	void	BindShader_DeepGBufferRadiosityBlur()
-	{
-		BindShader_Builtin( BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR );
-	}
-
-	void	BindShader_DeepGBufferRadiosityBlurAndOutput()
-	{
-		BindShader_Builtin( BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR_AND_OUTPUT );
-	}
-
-#if 0
-	void	BindShader_ZCullReconstruct()
-	{
-		BindShader_Builtin( BUILTIN_ZCULL_RECONSTRUCT );
-	}
-#endif
-
-	void	BindShader_Bink()
-	{
-		BindShader_Builtin( BUILTIN_BINK );
-	}
-
-	// SRS - Added Bink shader without sRGB to linear conversion for testVideo cmd
-	void	BindShader_Bink_sRGB()
-	{
-		BindShader_Builtin( BUILTIN_BINK_SRGB );
-	}
-
-	void	BindShader_BinkGUI()
-	{
-		BindShader_Builtin( BUILTIN_BINK_GUI );
-	}
-
-	void	BindShader_MotionBlur()
-	{
-		BindShader_Builtin( BUILTIN_MOTION_BLUR );
-	}
-
-	void	BindShader_DebugShadowMap()
-	{
-		BindShader_Builtin( BUILTIN_DEBUG_SHADOWMAP );
-	}
-	// RB end
-
-	// the joints buffer should only be bound for vertex programs that use joints
-	bool		ShaderUsesJoints() const
-	{
-		return currentUsesJoints;
-	}
-	// the rpEnableSkinning render parm should only be set for vertex programs that use it
-	bool		ShaderHasOptionalSkinning() const
-	{
-		return currentOptionalSkinning;
-	}
 
 	// unbind the currently bound render program
-	void		Unbind();
-
-	// RB begin
-	bool		IsShaderBound() const;
-	// RB end
+	void	Unbind();
 
 	// this should only be called via the reload shader console command
-	void		LoadAllShaders();
-	void		KillAllShaders();
+	void	LoadAllShaders();
+	void	KillAllShaders();
 
-	const char*	GetGLSLParmName( int rp ) const;
-
-	void		SetUniformValue( const renderParm_t rp, const float value[4] );
-	void		CommitUniforms( uint64 stateBits );
-	int			FindGLSLProgram( const char* name, int vIndex, int fIndex );
-	void		ZeroUniforms();
+	void	CommitUniforms( uint64 stateBits );
+	int		FindGLSLProgram( const char* name, int vIndex, int fIndex );
 
 private:
-	// a legacy shader name (builtin table entry plus suffix) mapped to the
-	// renderprog decl that implements it
-	struct shaderEntry_t
-	{
-		idStr	name;
-		idDeclRenderProg* decl;
-	};
-
 	// a linked pair of a vertex and a fragment shader; the decl of the pair
 	// owns the GL program
 	struct programEntry_t
@@ -1525,150 +1087,8 @@ private:
 	// cached joint and skinning state of the current program
 	void	BindDecl( idDeclRenderProg* decl );
 
-	enum
-	{
-		BUILTIN_GUI,
-		BUILTIN_COLOR,
-		// RB begin
-		BUILTIN_COLOR_SKINNED,
-		BUILTIN_VERTEX_COLOR,
-		BUILTIN_AMBIENT_LIGHTING,
-		BUILTIN_AMBIENT_LIGHTING_SKINNED,
-
-		BUILTIN_AMBIENT_LIGHTING_IBL,
-		BUILTIN_AMBIENT_LIGHTING_IBL_SKINNED,
-		BUILTIN_AMBIENT_LIGHTING_IBL_PBR,
-		BUILTIN_AMBIENT_LIGHTING_IBL_PBR_SKINNED,
-
-		BUILTIN_AMBIENT_LIGHTGRID_IBL,
-		BUILTIN_AMBIENT_LIGHTGRID_IBL_SKINNED,
-		BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR,
-		BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR_SKINNED,
-
-		BUILTIN_SMALL_GEOMETRY_BUFFER,
-		BUILTIN_SMALL_GEOMETRY_BUFFER_SKINNED,
-		// RB end
-		BUILTIN_TEXTURED,
-		BUILTIN_TEXTURE_VERTEXCOLOR,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SRGB,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SOFT,
-		BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED_SOFT,
-		BUILTIN_TEXTURE_TEXGEN_VERTEXCOLOR,
-		BUILTIN_INTERACTION,
-		BUILTIN_INTERACTION_SKINNED,
-		BUILTIN_INTERACTION_AMBIENT,
-		BUILTIN_INTERACTION_AMBIENT_SKINNED,
-		// RB begin
-		BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_POINT,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_POINT_SKINNED,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL,
-		BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED,
-
-		BUILTIN_PBR_INTERACTION,
-		BUILTIN_PBR_INTERACTION_SKINNED,
-		BUILTIN_PBR_INTERACTION_AMBIENT,
-		BUILTIN_PBR_INTERACTION_AMBIENT_SKINNED,
-
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT_SKINNED,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL,
-		BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED,
-
-		BUILTIN_DEBUG_LIGHTGRID,
-		BUILTIN_DEBUG_LIGHTGRID_SKINNED,
-
-		BUILTIN_DEBUG_OCTAHEDRON,
-		BUILTIN_DEBUG_OCTAHEDRON_SKINNED,
-		// RB end
-		BUILTIN_ENVIRONMENT,
-		BUILTIN_ENVIRONMENT_SKINNED,
-		BUILTIN_BUMPY_ENVIRONMENT,
-		BUILTIN_BUMPY_ENVIRONMENT_SKINNED,
-
-		BUILTIN_DEPTH,
-		BUILTIN_DEPTH_SKINNED,
-
-		BUILTIN_BLENDLIGHT,
-		BUILTIN_FOG,
-		BUILTIN_FOG_SKINNED,
-		BUILTIN_DIFFUSE_CUBE,
-		BUILTIN_SKYBOX,
-		BUILTIN_WOBBLESKY,
-		BUILTIN_ATMOS_SKY,
-		BUILTIN_ATMOS_SKY_CUBE,
-		BUILTIN_GLASSWARP,
-		BUILTIN_POSTPROCESS,
-		// RB begin
-		BUILTIN_SCREEN,
-		BUILTIN_TONEMAP,
-		BUILTIN_BRIGHTPASS,
-		BUILTIN_HDR_GLARE_CHROMATIC,
-		BUILTIN_HDR_DEBUG,
-
-		BUILTIN_SMAA_EDGE_DETECTION,
-		BUILTIN_SMAA_BLENDING_WEIGHT_CALCULATION,
-		BUILTIN_SMAA_NEIGHBORHOOD_BLENDING,
-
-		BUILTIN_AMBIENT_OCCLUSION,
-		BUILTIN_AMBIENT_OCCLUSION_AND_OUTPUT,
-		BUILTIN_AMBIENT_OCCLUSION_BLUR,
-		BUILTIN_AMBIENT_OCCLUSION_BLUR_AND_OUTPUT,
-		BUILTIN_AMBIENT_OCCLUSION_MINIFY,
-		BUILTIN_AMBIENT_OCCLUSION_RECONSTRUCT_CSZ,
-
-		BUILTIN_DEEP_GBUFFER_RADIOSITY_SSGI,
-		BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR,
-		BUILTIN_DEEP_GBUFFER_RADIOSITY_BLUR_AND_OUTPUT,
-		// RB end
-		BUILTIN_BINK,
-		BUILTIN_BINK_SRGB,	// SRS - Added Bink shader without sRGB to linear conversion for testVideo cmd
-		BUILTIN_BINK_GUI,
-		BUILTIN_MOTION_BLUR,
-
-		BUILTIN_DEBUG_SHADOWMAP,
-
-		MAX_BUILTINS
-	};
-	int builtinShaders[MAX_BUILTINS];
-	void BindShader_Builtin( int i )
-	{
-		BindProgram( builtinShaders[i] );
-	}
-
-	enum shaderFeature_t
-	{
-		USE_GPU_SKINNING,
-		LIGHT_POINT,
-		LIGHT_PARALLEL,
-		BRIGHTPASS,
-		HDR_DEBUG,
-		USE_SRGB,
-		USE_PBR,
-		USE_SOFT_PARTICLE,
-
-		MAX_SHADER_MACRO_NAMES,
-	};
-
-	int		currentRenderProgram;
 	idList<programEntry_t, TAG_RENDER>		glslPrograms;
-	idStaticList< idVec4, RENDERPARM_TOTAL >	glslUniforms;
 
-	int		currentVertexShader;
-	int		currentFragmentShader;
-	idList<shaderEntry_t, TAG_RENDER>		vertexShaders;
-	idList<shaderEntry_t, TAG_RENDER>		fragmentShaders;
-
-	// cached state of the currently bound decl; the per-shader tables of the
-	// legacy manager are gone so the joint and skinning queries read these
-	// copies instead
-	idDeclRenderProg*	currentDecl;
-	bool	currentUsesJoints;
-	bool	currentOptionalSkinning;
 };
 
 #endif // !USE_VULKAN
