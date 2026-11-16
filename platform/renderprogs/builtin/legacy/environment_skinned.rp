@@ -35,6 +35,8 @@ If you have questions concerning this license or the applicable additional terms
  */
 
 renderProg builtin/legacy/environment_skinned {
+#define USE_GPU_SKINNING 1
+
 	hlsl_vp {
 		uniform matrices_ubo { float4 matrices[408]; };
 
