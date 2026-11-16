@@ -154,7 +154,9 @@ void idDeclRenderProg::Clear() {
 	// the GL program and its location lists belong to the parsed data and
 	// are released together; a re-parsed decl rebuilds its program on the
 	// next bind
+#if !defined( USE_VULKAN )
 	FreeProgram();
+#endif
 	data.Clear();
 	inheritsFromDecl = nullptr;
 	vertexProgramChecksum = 0;
@@ -177,10 +179,12 @@ idDeclRenderProg::FreeData
 =================
 */
 void idDeclRenderProg::FreeData() {
+#if !defined( USE_VULKAN )
 	if ( program != 0 ) {
 		GL_DeleteProgram( program );
 		program = 0;
 	}
+#endif
 	Clear();
 }
 
@@ -422,6 +426,11 @@ idDeclRenderProg::EnsureUploaded
 =================
 */
 void idDeclRenderProg::EnsureUploaded() {
+#if defined( USE_VULKAN )
+	// the Vulkan backend uses the legacy render prog manager; compiling the
+	// generated GLSL into a program is OpenGL only
+	return;
+#else
 	// the program is only valid together with the location lists resolved
 	// for the current parm lists; if the decl data was re-populated after
 	// the last upload the sizes no longer match, and the program is
@@ -436,5 +445,6 @@ void idDeclRenderProg::EnsureUploaded() {
 		FreeProgram();
 	}
 	UploadTargetCode();
+#endif
 }
 
