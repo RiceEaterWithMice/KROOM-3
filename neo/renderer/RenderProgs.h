@@ -836,7 +836,7 @@ private:
 
 	// converts the decl's generated GLSL to UBO based Vulkan GLSL, compiles
 	// it to SPIR-V with shaderc, and creates the modules and layouts;
-	// implemented in Vulkan/RenderProgs_VK.cpp
+	// implemented in Vulkan/vk_DeclRenderProg.cpp
 	void	UploadDeclProgram( programEntry_t & program );
 
 	// suballocates the uniform block values of one stage from the frame
