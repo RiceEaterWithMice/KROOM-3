@@ -913,6 +913,10 @@ void idDeclManagerLocal::Init()
 
 	RegisterDeclFolder( "materials",		".mtr",				DECL_MATERIAL );
 	RegisterDeclFolder( "atmos",			".atmos",			DECL_ATMOS );
+	// registered during Init() so the renderprog decls exist before the
+	// renderer initializes and idRenderProgManager::Init() resolves the
+	// builtin shaders
+	RegisterDeclFolder( "renderprogs",	".rp",				DECL_RENDERPROG );
 
 	// add console commands
 	cmdSystem->AddCommand( "listDecls", ListDecls_f, CMD_FL_SYSTEM, "lists all decls" );
@@ -953,7 +957,6 @@ void idDeclManagerLocal::Init2()
 {
 	RegisterDeclFolder( "skins",			".skin",			DECL_SKIN );
 	RegisterDeclFolder( "sound",			".sndshd",			DECL_SOUND );
-	RegisterDeclFolder( "renderprogs",		".rp",				DECL_RENDERPROG );
 }
 
 /*
@@ -2468,108 +2471,3 @@ void idDeclLocal::Print() const
 }
 
 /*
-=================
-idDeclLocal::Reload
-=================
-*/
-void idDeclLocal::Reload()
-{
-	this->sourceFile->Reload( false );
-}
-
-/*
-=================
-idDeclLocal::AllocateSelf
-=================
-*/
-void idDeclLocal::AllocateSelf()
-{
-	if( self == NULL )
-	{
-		self = declManagerLocal.GetDeclType( ( int )type )->allocator();
-		self->base = this;
-	}
-}
-
-/*
-=================
-idDeclLocal::ParseLocal
-=================
-*/
-void idDeclLocal::ParseLocal()
-{
-	bool generatedDefaultText = false;
-
-	AllocateSelf();
-
-	// always free data before parsing
-	self->FreeData();
-
-	declManagerLocal.MediaPrint( "parsing %s %s\n", declManagerLocal.declTypes[type]->typeName.c_str(), name.c_str() );
-
-	// if no text source try to generate default text
-	if( textSource == NULL )
-	{
-		generatedDefaultText = self->SetDefaultText();
-	}
-
-	// indent for DEFAULTED or media file references
-	declManagerLocal.indent++;
-
-	// no text immediately causes a MakeDefault()
-	if( textSource == NULL )
-	{
-		MakeDefault();
-		declManagerLocal.indent--;
-		return;
-	}
-
-	declState = DS_PARSED;
-
-	// parse
-	char* declText = ( char* ) _alloca( ( GetTextLength() + 1 ) * sizeof( char ) );
-	GetText( declText );
-	self->Parse( declText, GetTextLength(), true );
-
-	// free generated text
-	if( generatedDefaultText )
-	{
-		Mem_Free( textSource );
-		textSource = NULL;
-		textLength = 0;
-	}
-
-	declManagerLocal.indent--;
-}
-
-/*
-=================
-idDeclLocal::Purge
-=================
-*/
-void idDeclLocal::Purge()
-{
-	// never purge things that were referenced outside level load,
-	// like the console and menu graphics
-	if( parsedOutsideLevelLoad )
-	{
-		return;
-	}
-
-	referencedThisLevel = false;
-	MakeDefault();
-
-	// the next Find() for this will re-parse the real data
-	declState = DS_UNPARSED;
-}
-
-/*
-=================
-idDeclLocal::EverReferenced
-=================
-*/
-bool idDeclLocal::EverReferenced() const
-{
-	return everReferenced;
-}
-
