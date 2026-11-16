@@ -1,272 +1,11 @@
 /*
- * Generated from platform/renderprogs/builtin/lighting/interactionSM.vs.hlsl and platform/renderprogs/builtin/lighting/interactionSM.ps.hlsl
- * (RBDOOM-3-BFG GPL shader sources) for the renderprog decl system, whose
- * engine code is adapted from the Wolfenstein: The New Order decl
- * renderprog re-implementation on this engine's idlib.
- */
-
-renderProg builtin/lighting/interactionSM_parallel_PBR {
-#define LIGHT_PARALLEL 1
-#define USE_PBR 1
-
-	hlsl_vp {
-/*
 ===========================================================================
 
 Doom 3 BFG Edition GPL Source Code
 Copyright (C) 1993-2012 id Software LLC, a ZeniMax Media company.
 Copyright (C) 2014 Robert Beckebans
-
-This file is part of the Doom 3 BFG Edition GPL Source Code ("Doom 3 BFG Edition Source Code").
-
-Doom 3 BFG Edition Source Code is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Doom 3 BFG Edition Source Code is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Doom 3 BFG Edition Source Code.  If not, see <http://www.gnu.org/licenses/>.
-
-In addition, the Doom 3 BFG Edition Source Code is also subject to certain additional terms. You should have received a copy of these additional terms immediately following the terms and conditions of the GNU General Public License which accompanied the Doom 3 BFG Edition Source Code.  If not, please request a copy in writing from id Software at the address below.
-
-If you have questions concerning this license or the applicable additional terms, you may contact in writing id Software LLC, c/o ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
-
-===========================================================================
-*/
-
-
-
-#if defined( USE_GPU_SKINNING )
-uniform matrices_ubo { float4 matrices[408]; };
-#endif
-
-// *INDENT-OFF*
-struct VS_IN {
-	float4 position : POSITION;
-	float2 texcoord : TEXCOORD0;
-	float4 normal : NORMAL;
-	float4 tangent : TANGENT;
-	float4 color : COLOR0;
-	float4 color2 : COLOR1;
-};
-
-struct VS_OUT {
-	float4 position		: POSITION;
-	float4 texcoord0	: TEXCOORD0;
-	float4 texcoord1	: TEXCOORD1;
-	float4 texcoord2	: TEXCOORD2;
-	float4 texcoord3	: TEXCOORD3;
-	float4 texcoord4	: TEXCOORD4;
-	float4 texcoord5	: TEXCOORD5;
-	float4 texcoord6	: TEXCOORD6;
-	float4 texcoord7	: TEXCOORD7;
-	float4 texcoord8	: TEXCOORD8;
-	float4 texcoord9	: TEXCOORD9;
-	float4 color		: COLOR0;
-};
-// *INDENT-ON*
-
-void main( VS_IN vertex, out VS_OUT result )
-{
-
-	float4 vNormal = vertex.normal * 2.0 - 1.0;
-	float4 vTangent = vertex.tangent * 2.0 - 1.0;
-	float3 vBitangent = cross( vNormal.xyz, vTangent.xyz ) * vTangent.w;
-
-#if defined( USE_GPU_SKINNING )
-	//--------------------------------------------------------------
-	// GPU transformation of the normal / tangent / bitangent
-	//
-	// multiplying with 255.1 give us the same result and is faster than floor( w * 255 + 0.5 )
-	//--------------------------------------------------------------
-	const float w0 = vertex.color2.x;
-	const float w1 = vertex.color2.y;
-	const float w2 = vertex.color2.z;
-	const float w3 = vertex.color2.w;
-
-	float4 matX, matY, matZ;	// must be float4 for vec4
-	int joint = int( vertex.color.x * 255.1 * 3.0 );
-	matX = matrices[int( joint + 0 )] * w0;
-	matY = matrices[int( joint + 1 )] * w0;
-	matZ = matrices[int( joint + 2 )] * w0;
-
-	joint = int( vertex.color.y * 255.1 * 3.0 );
-	matX += matrices[int( joint + 0 )] * w1;
-	matY += matrices[int( joint + 1 )] * w1;
-	matZ += matrices[int( joint + 2 )] * w1;
-
-	joint = int( vertex.color.z * 255.1 * 3.0 );
-	matX += matrices[int( joint + 0 )] * w2;
-	matY += matrices[int( joint + 1 )] * w2;
-	matZ += matrices[int( joint + 2 )] * w2;
-
-	joint = int( vertex.color.w * 255.1 * 3.0 );
-	matX += matrices[int( joint + 0 )] * w3;
-	matY += matrices[int( joint + 1 )] * w3;
-	matZ += matrices[int( joint + 2 )] * w3;
-
-	float3 normal;
-	normal.x = dot3( matX, vNormal );
-	normal.y = dot3( matY, vNormal );
-	normal.z = dot3( matZ, vNormal );
-	normal = normalize( normal );
-
-	float3 tangent;
-	tangent.x = dot3( matX, vTangent );
-	tangent.y = dot3( matY, vTangent );
-	tangent.z = dot3( matZ, vTangent );
-	tangent = normalize( tangent );
-
-	float3 bitangent;
-	bitangent.x = dot3( matX, vBitangent );
-	bitangent.y = dot3( matY, vBitangent );
-	bitangent.z = dot3( matZ, vBitangent );
-	bitangent = normalize( bitangent );
-
-	float4 modelPosition;
-	modelPosition.x = dot4( matX, vertex.position );
-	modelPosition.y = dot4( matY, vertex.position );
-	modelPosition.z = dot4( matZ, vertex.position );
-	modelPosition.w = 1.0;
-
-#else
-	float4 modelPosition = vertex.position;
-	float3 normal = vNormal.xyz;
-	float3 tangent = vTangent.xyz;
-	float3 bitangent = vBitangent.xyz;
-#endif
-
-	result.position.x = dot4( modelPosition, rpMVPmatrixX );
-	result.position.y = dot4( modelPosition, rpMVPmatrixY );
-	result.position.z = dot4( modelPosition, rpMVPmatrixZ );
-	result.position.w = dot4( modelPosition, rpMVPmatrixW );
-
-	float4 defaultTexCoord = float4( 0.0f, 0.5f, 0.0f, 1.0f );
-
-	//calculate vector to light
-	float4 toLightLocal = rpLocalLightOrigin - modelPosition;
-
-	//--------------------------------------------------------------
-
-	//result.texcoord0 is the direction to the light in tangent space
-	result.texcoord0.x = dot3( tangent, toLightLocal );
-	result.texcoord0.y = dot3( bitangent, toLightLocal );
-	result.texcoord0.z = dot3( normal, toLightLocal );
-	result.texcoord0.w = 1.0f;
-
-	//textures 1 takes the base coordinates by the texture matrix
-	result.texcoord1 = defaultTexCoord;
-	result.texcoord1.x = dot4( vertex.texcoord.xy, rpBumpMatrixS );
-	result.texcoord1.y = dot4( vertex.texcoord.xy, rpBumpMatrixT );
-
-	//# texture 2 has one texgen
-	result.texcoord2 = defaultTexCoord;
-	result.texcoord2.x = dot4( modelPosition, rpLightFalloffS );
-
-	//# texture 3 has three texgens
-	result.texcoord3.x = dot4( modelPosition, rpLightProjectionS );
-	result.texcoord3.y = dot4( modelPosition, rpLightProjectionT );
-	result.texcoord3.z = 0.0f;
-	result.texcoord3.w = dot4( modelPosition, rpLightProjectionQ );
-
-	//# textures 4 takes the base coordinates by the texture matrix
-	result.texcoord4 = defaultTexCoord;
-	result.texcoord4.x = dot4( vertex.texcoord.xy, rpDiffuseMatrixS );
-	result.texcoord4.y = dot4( vertex.texcoord.xy, rpDiffuseMatrixT );
-
-	//# textures 5 takes the base coordinates by the texture matrix
-	result.texcoord5 = defaultTexCoord;
-	result.texcoord5.x = dot4( vertex.texcoord.xy, rpSpecularMatrixS );
-	result.texcoord5.y = dot4( vertex.texcoord.xy, rpSpecularMatrixT );
-
-	//# texture 6's texcoords will be the halfangle in texture space
-
-	//# calculate normalized vector to light in R0
-	toLightLocal = normalize( toLightLocal );
-
-	//# calculate normalized vector to viewer in R1
-	float4 toView = normalize( rpLocalViewOrigin - modelPosition );
-
-	//# put into texture space
-	result.texcoord6.x = dot3( tangent, toView );
-	result.texcoord6.y = dot3( bitangent, toView );
-	result.texcoord6.z = dot3( normal, toView );
-	result.texcoord6.w = 1.0f;
-
-	result.texcoord7 = modelPosition;
-
-	float4 worldPosition;
-	worldPosition.x = dot4( modelPosition, rpModelMatrixX );
-	worldPosition.y = dot4( modelPosition, rpModelMatrixY );
-	worldPosition.z = dot4( modelPosition, rpModelMatrixZ );
-	worldPosition.w = dot4( modelPosition, rpModelMatrixW );
-
-	float4 toLightGlobal = rpGlobalLightOrigin - worldPosition;
-
-	result.texcoord8 = toLightGlobal;
-
-	float4 viewPosition;
-	viewPosition.x = dot4( modelPosition, rpModelViewMatrixX );
-	viewPosition.y = dot4( modelPosition, rpModelViewMatrixY );
-	viewPosition.z = dot4( modelPosition, rpModelViewMatrixZ );
-	viewPosition.w = dot4( modelPosition, rpModelViewMatrixW );
-
-	result.texcoord9 = viewPosition;
-
-#if defined( USE_GPU_SKINNING )
-	// for joint transformation of the tangent space, we use color and
-	// color2 for weighting information, so hopefully there aren't any
-	// effects that need vertex color...
-	result.color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
-#else
-	//# generate the vertex color, which can be 1.0, color, or 1.0 - color
-	//# for 1.0 : env[16] = 0, env[17] = 1
-	//# for color : env[16] = 1, env[17] = 0
-	//# for 1.0-color : env[16] = -1, env[17] = 1
-	result.color = ( swizzleColor( vertex.color ) * rpVertexColorModulate ) + rpVertexColorAdd;
-#endif
-}
-	}
-	hlsl_fp {
-/*
-===========================================================================
-
-Doom 3 BFG Edition GPL Source Code
-Copyright (C) 1993-2012 id Software LLC, a ZeniMax Media company.
 Copyright (C) 2013-2021 Robert Beckebans
 Copyright (C) 2020 Panos Karabelas
-
-This file is part of the Doom 3 BFG Edition GPL Source Code ("Doom 3 BFG Edition Source Code").
-
-Doom 3 BFG Edition Source Code is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Doom 3 BFG Edition Source Code is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Doom 3 BFG Edition Source Code.  If not, see <http://www.gnu.org/licenses/>.
-
-In addition, the Doom 3 BFG Edition Source Code is also subject to certain additional terms. You should have received a copy of these additional terms immediately following the terms and conditions of the GNU General Public License which accompanied the Doom 3 BFG Edition Source Code.  If not, please request a copy in writing from id Software at the address below.
-
-If you have questions concerning this license or the applicable additional terms, you may contact in writing id Software LLC, c/o ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
-
-===========================================================================
-*/
-
-/*
-===========================================================================
-
-Doom 3 BFG Edition GPL Source Code
 Copyright (C) 2014-2020 Robert Beckebans
 
 This file is part of the Doom 3 BFG Edition GPL Source Code ("Doom 3 BFG Edition Source Code").
@@ -291,650 +30,844 @@ If you have questions concerning this license or the applicable additional terms
 ===========================================================================
 */
 
-// Normal Distribution Function ( NDF ) or D( h )
-// GGX ( Trowbridge-Reitz )
-half Distribution_GGX( half hdotN, half alpha )
-{
-	// alpha is assumed to be roughness^2
-	float a2 = alpha * alpha;
-	//float tmp = ( hdotN * hdotN ) * ( a2 - 1.0 ) + 1.0;
-	float tmp = ( hdotN * a2 - hdotN ) * hdotN + 1.0;
-
-	return ( a2 / ( PI * tmp * tmp ) );
-}
-
-half Distribution_GGX_Disney( half hdotN, half alphaG )
-{
-	float a2 = alphaG * alphaG;
-	float tmp = ( hdotN * hdotN ) * ( a2 - 1.0 ) + 1.0;
-	//tmp *= tmp;
-
-	return ( a2 / ( PI * tmp ) );
-}
-
-half Distribution_GGX_1886( half hdotN, half alpha )
-{
-	// alpha is assumed to be roughness^2
-	return ( alpha / ( PI * pow( hdotN * hdotN * ( alpha - 1.0 ) + 1.0, 2.0 ) ) );
-}
-
-// Fresnel term F( v, h )
-// Fnone( v, h ) = F(0) = specularColor
-half3 Fresnel_Schlick( half3 specularColor, half vDotN )
-{
-	return specularColor + ( 1.0 - specularColor ) * pow( 1.0 - vDotN, 5.0 );
-}
-
-// Fresnel term that takes roughness into account so rough non-metal surfaces aren't too shiny [Lagarde11]
-half3 Fresnel_SchlickRoughness( half3 specularColor, half vDotN, half roughness )
-{
-	float oneMinusRoughness = 1.0 - roughness;
-	return specularColor + ( max( half3( oneMinusRoughness, oneMinusRoughness, oneMinusRoughness ), specularColor ) - specularColor ) * pow( 1.0 - vDotN, 5.0 );
-}
-
-// Sebastien Lagarde proposes an empirical approach to derive the specular occlusion term from the diffuse occlusion term in [Lagarde14].
-// The result does not have any physical basis but produces visually pleasant results.
-// See Sebastien Lagarde and Charles de Rousiers. 2014. Moving Frostbite to PBR.
-float ComputeSpecularAO( float vDotN, float ao, float roughness )
-{
-	return clamp( pow( vDotN + ao, exp2( -16.0 * roughness - 1.0 ) ) - 1.0 + ao, 0.0, 1.0 );
-}
-
-// Visibility term G( l, v, h )
-// Very similar to Marmoset Toolbag 2 and gives almost the same results as Smith GGX
-float Visibility_Schlick( half vdotN, half ldotN, float alpha )
-{
-	float k = alpha * 0.5;
-
-	float schlickL = ( ldotN * ( 1.0 - k ) + k );
-	float schlickV = ( vdotN * ( 1.0 - k ) + k );
-
-	return ( 0.25 / ( schlickL * schlickV ) );
-	//return ( ( schlickL * schlickV ) / ( 4.0 * vdotN * ldotN ) );
-}
-
-// see s2013_pbs_rad_notes.pdf
-// Crafting a Next-Gen Material Pipeline for The Order: 1886
-// this visibility function also provides some sort of back lighting
-float Visibility_SmithGGX( half vdotN, half ldotN, float alpha )
-{
-	// alpha is already roughness^2
-
-	float V1 = ldotN + sqrt( alpha + ( 1.0 - alpha ) * ldotN * ldotN );
-	float V2 = vdotN + sqrt( alpha + ( 1.0 - alpha ) * vdotN * vdotN );
-
-	// RB: avoid too bright spots
-	return ( 1.0 / max( V1 * V2, 0.15 ) );
-}
-
-// HACK calculate roughness from D3 gloss maps
-float EstimateLegacyRoughness( float3 specMapSRGB )
-{
-	float Y = dot( LUMINANCE_SRGB.rgb, specMapSRGB );
-
-	//float glossiness = clamp( 1.0 - specMapSRGB.r, 0.0, 0.98 );
-	float glossiness = clamp( pow( Y, 1.0 / 2.0 ), 0.0, 0.98 );
-
-	float roughness = 1.0 - glossiness;
-
-	return roughness;
-}
-
-// Environment BRDF approximations
-// see s2013_pbs_black_ops_2_notes.pdf
 /*
-half a1vf( half g )
-{
-	return ( 0.25 * g + 0.75 );
-}
+ * Generated from platform/renderprogs/builtin/lighting/interactionSM.vs.hlsl and platform/renderprogs/builtin/lighting/interactionSM.ps.hlsl
+ * (RBDOOM-3-BFG GPL shader sources) for the renderprog decl system, whose
+ * engine code is adapted from the Wolfenstein: The New Order decl
+ * renderprog re-implementation on this engine's idlib.
+ */
 
-half a004( half g, half vdotN )
-{
-	float t = min( 0.475 * g, exp2( -9.28 * vdotN ) );
-	return ( t + 0.0275 ) * g + 0.015;
-}
+renderProg builtin/lighting/interactionSM_parallel_PBR {
+#define LIGHT_PARALLEL 1
+#define USE_PBR 1
 
-half a0r( half g, half vdotN )
-{
-	return ( ( a004( g, vdotN ) - a1vf( g ) * 0.04 ) / 0.96 );
-}
+	hlsl_vp {
+		#if defined( USE_GPU_SKINNING )
+		uniform matrices_ubo { float4 matrices[408]; };
+		#endif
 
-float3 EnvironmentBRDF( half g, half vdotN, float3 rf0 )
-{
-	float4 t = float4( 1.0 / 0.96, 0.475, ( 0.0275 - 0.25 * 0.04 ) / 0.96, 0.25 );
-	t *= float4( g, g, g, g );
-	t += float4( 0.0, 0.0, ( 0.015 - 0.75 * 0.04 ) / 0.96, 0.75 );
-	half a0 = t.x * min( t.y, exp2( -9.28 * vdotN ) ) + t.z;
-	half a1 = t.w;
+		// *INDENT-OFF*
+		struct VS_IN {
+			float4 position : POSITION;
+			float2 texcoord : TEXCOORD0;
+			float4 normal : NORMAL;
+			float4 tangent : TANGENT;
+			float4 color : COLOR0;
+			float4 color2 : COLOR1;
+		};
 
-	return saturate( a0 + rf0 * ( a1 - a0 ) );
-}
+		struct VS_OUT {
+			float4 position		: POSITION;
+			float4 texcoord0	: TEXCOORD0;
+			float4 texcoord1	: TEXCOORD1;
+			float4 texcoord2	: TEXCOORD2;
+			float4 texcoord3	: TEXCOORD3;
+			float4 texcoord4	: TEXCOORD4;
+			float4 texcoord5	: TEXCOORD5;
+			float4 texcoord6	: TEXCOORD6;
+			float4 texcoord7	: TEXCOORD7;
+			float4 texcoord8	: TEXCOORD8;
+			float4 texcoord9	: TEXCOORD9;
+			float4 color		: COLOR0;
+		};
+		// *INDENT-ON*
 
-
-half3 EnvironmentBRDFApprox( half roughness, half vdotN, half3 specularColor )
-{
-	const half4 c0 = half4( -1, -0.0275, -0.572, 0.022 );
-	const half4 c1 = half4( 1, 0.0425, 1.04, -0.04 );
-
-	half4 r = roughness * c0 + c1;
-	half a004 = min( r.x * r.x, exp2( -9.28 * vdotN ) ) * r.x + r.y;
-	half2 AB = half2( -1.04, 1.04 ) * a004 + r.zw;
-
-	return specularColor * AB.x + AB.y;
-}
-*/
-
-
-
-
-
-// *INDENT-OFF*
-uniform sampler2D				samp0 : register(s0); // texture 1 is the per-surface normal map
-uniform sampler2D				samp1 : register(s1); // texture 3 is the per-surface specular or roughness/metallic/AO mixer map
-uniform sampler2D				samp2 : register(s2); // texture 2 is the per-surface baseColor map
-uniform sampler2D				samp3 : register(s3); // texture 4 is the light falloff texture
-uniform sampler2D				samp4 : register(s4); // texture 5 is the light projection texture
-uniform sampler2DArrayShadow	samp5 : register(s5); // texture 6 is the shadowmap array
-uniform sampler2D				samp6 : register(s6); // texture 7 is the jitter texture
-uniform sampler2D				samp7 : register(s7); // texture 8 is the layer map
-
-struct PS_IN
-{
-	half4 position		: VPOS;
-	half4 texcoord0		: TEXCOORD0;
-	half4 texcoord1		: TEXCOORD1;
-	half4 texcoord2		: TEXCOORD2;
-	half4 texcoord3		: TEXCOORD3;
-	half4 texcoord4		: TEXCOORD4;
-	half4 texcoord5		: TEXCOORD5;
-	half4 texcoord6		: TEXCOORD6;
-	half4 texcoord7		: TEXCOORD7;
-	half4 texcoord8		: TEXCOORD8;
-	half4 texcoord9		: TEXCOORD9;
-	half4 color			: COLOR0;
-};
-
-struct PS_OUT
-{
-	half4 color : COLOR;
-};
-// *INDENT-ON*
-
-float BlueNoise( float2 n, float x )
-{
-	float2 uv = n.xy * rpJitterTexOffset.xy;
-
-	float noise = tex2D( samp6, uv ).r;
-
-	noise = fract( noise + c_goldenRatioConjugate * rpJitterTexOffset.w * x );
-
-	//noise = RemapNoiseTriErp( noise );
-	//noise = noise * 2.0 - 0.5;
-
-	return noise;
-}
-
-float2 VogelDiskSample( float sampleIndex, float samplesCount, float phi )
-{
-	float goldenAngle = 2.4f;
-
-	float r = sqrt( sampleIndex + 0.5f ) / sqrt( samplesCount );
-	float theta = sampleIndex * goldenAngle + phi;
-
-	float sine = sin( theta );
-	float cosine = cos( theta );
-
-	return float2( r * cosine, r * sine );
-}
-
-// Sheen (Zeltner et al. 2022 Charlie NDF)
-float SheenLookup( float x, float alphaG )
-{
-	float oneMinusAlphaSq = ( 1.0 - alphaG ) * ( 1.0 - alphaG );
-	float a = lerp( 25.3245, 21.5473, oneMinusAlphaSq );
-	float b = lerp( 3.3244,  3.8299, oneMinusAlphaSq );
-	float c = lerp( 0.1680,  0.1982, oneMinusAlphaSq );
-	float d = lerp( -1.2739, -1.9736, oneMinusAlphaSq );
-	float e = lerp( -4.8597, -4.3205, oneMinusAlphaSq );
-	return a / ( 1.0 + b * pow( abs( x ), c ) ) + d * x + e;
-}
-
-float D_Charlie( float roughness, float NdotH )
-{
-	float alpha    = roughness * roughness;
-	float invAlpha = 1.0 / max( alpha, 0.001 );
-	float sin2h    = max( 1.0 - NdotH * NdotH, 0.0078125 );
-	return ( 2.0 + invAlpha ) * pow( sin2h, invAlpha * 0.5 ) / ( 2.0 * PI );
-}
-
-float V_Sheen( float NdotL, float NdotV, float roughness )
-{
-	float alphaG  = roughness * roughness;
-	float lambdaV = exp( SheenLookup( NdotV, alphaG ) );
-	float lambdaL = exp( SheenLookup( NdotL, alphaG ) );
-	return 1.0 / ( ( 1.0 + lambdaV + lambdaL ) * ( 4.0 * max( NdotV * NdotL, 0.0001 ) ) );
-}
-
-half3 EvaluateSheen( half3 sheenColor, float sheenRoughness, float NdotL, float NdotV, float NdotH )
-{
-	if( dot( sheenColor, sheenColor ) < 0.0001 )
-	{
-		return half3( 0.0, 0.0, 0.0 );
-	}
-	float D = D_Charlie( sheenRoughness, NdotH );
-	float V = V_Sheen( NdotL, NdotV, sheenRoughness );
-	return sheenColor * D * V;
-}
-
-// Coat (GGX clearcoat, IOR 1.5, F0 = 0.04)
-half3 EvaluateCoat( float coatWeight, float coatRoughness, float NdotL, float NdotV, float NdotH, float VdotH )
-{
-	if( coatWeight < 0.001 )
-	{
-		return half3( 0.0, 0.0, 0.0 );
-	}
-
-	float alpha  = coatRoughness * coatRoughness;
-	float alpha2 = alpha * alpha;
-	float denom  = NdotH * NdotH * ( alpha2 - 1.0 ) + 1.0;
-	float D      = alpha2 / ( PI * denom * denom );
-
-	float k  = ( coatRoughness + 1.0 );
-	float k2 = ( k * k ) / 8.0;
-	float GV = NdotV / ( NdotV * ( 1.0 - k2 ) + k2 );
-	float GL = NdotL / ( NdotL * ( 1.0 - k2 ) + k2 );
-	float G  = GV * GL;
-
-	float Fc    = pow( 1.0 - VdotH, 5.0 );
-	float3 Fcoat = float3( 0.04 + ( 1.0 - 0.04 ) * Fc );
-
-	return coatWeight * Fcoat * D * G / max( 4.0 * NdotL * NdotV, 0.0001 );
-}
-
-float CoatAttenuation( float coatWeight, float NdotV )
-{
-	float Fc = pow( 1.0 - NdotV, 5.0 );
-	float F  = 0.04 + ( 1.0 - 0.04 ) * Fc;
-	return 1.0 - coatWeight * F;
-}
-
-void main( PS_IN fragment, out PS_OUT result )
-{
-	half4 bumpMap =			tex2D( samp0, fragment.texcoord1.xy );
-	half4 lightFalloff =	( idtex2Dproj( samp3, fragment.texcoord2 ) );
-	half4 lightProj	= ( idtex2Dproj( samp4, fragment.texcoord3 ) );
-	half4 YCoCG =			tex2D( samp2, fragment.texcoord4.xy );
-	half4 specMapSRGB =		tex2D( samp1, fragment.texcoord5.xy );
-	half4 specMap =			sRGBAToLinearRGBA( specMapSRGB );
-
-	half3 lightVector = normalize( fragment.texcoord0.xyz );
-	half3 viewVector = normalize( fragment.texcoord6.xyz );
-	half3 diffuseMap = sRGBToLinearRGB( ConvertYCoCgToRGB( YCoCG ) );
-
-	half3 localNormal;
-	// RB begin
-#if defined(USE_NORMAL_FMT_RGB8)
-	localNormal.xy = bumpMap.rg - 0.5;
-#else
-	localNormal.xy = bumpMap.wy - 0.5;
-#endif
-	// RB end
-	localNormal.z = sqrt( abs( dot( localNormal.xy, localNormal.xy ) - 0.25 ) );
-	localNormal = normalize( localNormal );
-
-	// traditional very dark Lambert light model used in Doom 3
-	half ldotN = saturate( dot3( localNormal, lightVector ) );
-
-#if defined(USE_HALF_LAMBERT)
-	// RB: http://developer.valvesoftware.com/wiki/Half_Lambert
-	half halfLdotN = dot3( localNormal, lightVector ) * 0.5 + 0.5;
-	halfLdotN *= halfLdotN;
-
-	// tweak to not loose so many details
-	half lambert = lerp( ldotN, halfLdotN, 0.5 );
-#else
-	half lambert = ldotN;
-#endif
-
-
-	//
-	// shadow mapping
-	//
-	int shadowIndex = 0;
-
-#if defined( LIGHT_POINT )
-	float3 toLightGlobal = normalize( fragment.texcoord8.xyz );
-
-	float axis[6];
-	axis[0] = -toLightGlobal.x;
-	axis[1] =  toLightGlobal.x;
-	axis[2] = -toLightGlobal.y;
-	axis[3] =  toLightGlobal.y;
-	axis[4] = -toLightGlobal.z;
-	axis[5] =  toLightGlobal.z;
-
-	for( int i = 0; i < 6; i++ )
-	{
-		if( axis[i] > axis[shadowIndex] )
+		void main( VS_IN vertex, out VS_OUT result )
 		{
-			shadowIndex = i;
+
+			float4 vNormal = vertex.normal * 2.0 - 1.0;
+			float4 vTangent = vertex.tangent * 2.0 - 1.0;
+			float3 vBitangent = cross( vNormal.xyz, vTangent.xyz ) * vTangent.w;
+
+		#if defined( USE_GPU_SKINNING )
+			//--------------------------------------------------------------
+			// GPU transformation of the normal / tangent / bitangent
+			//
+			// multiplying with 255.1 give us the same result and is faster than floor( w * 255 + 0.5 )
+			//--------------------------------------------------------------
+			const float w0 = vertex.color2.x;
+			const float w1 = vertex.color2.y;
+			const float w2 = vertex.color2.z;
+			const float w3 = vertex.color2.w;
+
+			float4 matX, matY, matZ;	// must be float4 for vec4
+			int joint = int( vertex.color.x * 255.1 * 3.0 );
+			matX = matrices[int( joint + 0 )] * w0;
+			matY = matrices[int( joint + 1 )] * w0;
+			matZ = matrices[int( joint + 2 )] * w0;
+
+			joint = int( vertex.color.y * 255.1 * 3.0 );
+			matX += matrices[int( joint + 0 )] * w1;
+			matY += matrices[int( joint + 1 )] * w1;
+			matZ += matrices[int( joint + 2 )] * w1;
+
+			joint = int( vertex.color.z * 255.1 * 3.0 );
+			matX += matrices[int( joint + 0 )] * w2;
+			matY += matrices[int( joint + 1 )] * w2;
+			matZ += matrices[int( joint + 2 )] * w2;
+
+			joint = int( vertex.color.w * 255.1 * 3.0 );
+			matX += matrices[int( joint + 0 )] * w3;
+			matY += matrices[int( joint + 1 )] * w3;
+			matZ += matrices[int( joint + 2 )] * w3;
+
+			float3 normal;
+			normal.x = dot3( matX, vNormal );
+			normal.y = dot3( matY, vNormal );
+			normal.z = dot3( matZ, vNormal );
+			normal = normalize( normal );
+
+			float3 tangent;
+			tangent.x = dot3( matX, vTangent );
+			tangent.y = dot3( matY, vTangent );
+			tangent.z = dot3( matZ, vTangent );
+			tangent = normalize( tangent );
+
+			float3 bitangent;
+			bitangent.x = dot3( matX, vBitangent );
+			bitangent.y = dot3( matY, vBitangent );
+			bitangent.z = dot3( matZ, vBitangent );
+			bitangent = normalize( bitangent );
+
+			float4 modelPosition;
+			modelPosition.x = dot4( matX, vertex.position );
+			modelPosition.y = dot4( matY, vertex.position );
+			modelPosition.z = dot4( matZ, vertex.position );
+			modelPosition.w = 1.0;
+
+		#else
+			float4 modelPosition = vertex.position;
+			float3 normal = vNormal.xyz;
+			float3 tangent = vTangent.xyz;
+			float3 bitangent = vBitangent.xyz;
+		#endif
+
+			result.position.x = dot4( modelPosition, rpMVPmatrixX );
+			result.position.y = dot4( modelPosition, rpMVPmatrixY );
+			result.position.z = dot4( modelPosition, rpMVPmatrixZ );
+			result.position.w = dot4( modelPosition, rpMVPmatrixW );
+
+			float4 defaultTexCoord = float4( 0.0f, 0.5f, 0.0f, 1.0f );
+
+			//calculate vector to light
+			float4 toLightLocal = rpLocalLightOrigin - modelPosition;
+
+			//--------------------------------------------------------------
+
+			//result.texcoord0 is the direction to the light in tangent space
+			result.texcoord0.x = dot3( tangent, toLightLocal );
+			result.texcoord0.y = dot3( bitangent, toLightLocal );
+			result.texcoord0.z = dot3( normal, toLightLocal );
+			result.texcoord0.w = 1.0f;
+
+			//textures 1 takes the base coordinates by the texture matrix
+			result.texcoord1 = defaultTexCoord;
+			result.texcoord1.x = dot4( vertex.texcoord.xy, rpBumpMatrixS );
+			result.texcoord1.y = dot4( vertex.texcoord.xy, rpBumpMatrixT );
+
+			//# texture 2 has one texgen
+			result.texcoord2 = defaultTexCoord;
+			result.texcoord2.x = dot4( modelPosition, rpLightFalloffS );
+
+			//# texture 3 has three texgens
+			result.texcoord3.x = dot4( modelPosition, rpLightProjectionS );
+			result.texcoord3.y = dot4( modelPosition, rpLightProjectionT );
+			result.texcoord3.z = 0.0f;
+			result.texcoord3.w = dot4( modelPosition, rpLightProjectionQ );
+
+			//# textures 4 takes the base coordinates by the texture matrix
+			result.texcoord4 = defaultTexCoord;
+			result.texcoord4.x = dot4( vertex.texcoord.xy, rpDiffuseMatrixS );
+			result.texcoord4.y = dot4( vertex.texcoord.xy, rpDiffuseMatrixT );
+
+			//# textures 5 takes the base coordinates by the texture matrix
+			result.texcoord5 = defaultTexCoord;
+			result.texcoord5.x = dot4( vertex.texcoord.xy, rpSpecularMatrixS );
+			result.texcoord5.y = dot4( vertex.texcoord.xy, rpSpecularMatrixT );
+
+			//# texture 6's texcoords will be the halfangle in texture space
+
+			//# calculate normalized vector to light in R0
+			toLightLocal = normalize( toLightLocal );
+
+			//# calculate normalized vector to viewer in R1
+			float4 toView = normalize( rpLocalViewOrigin - modelPosition );
+
+			//# put into texture space
+			result.texcoord6.x = dot3( tangent, toView );
+			result.texcoord6.y = dot3( bitangent, toView );
+			result.texcoord6.z = dot3( normal, toView );
+			result.texcoord6.w = 1.0f;
+
+			result.texcoord7 = modelPosition;
+
+			float4 worldPosition;
+			worldPosition.x = dot4( modelPosition, rpModelMatrixX );
+			worldPosition.y = dot4( modelPosition, rpModelMatrixY );
+			worldPosition.z = dot4( modelPosition, rpModelMatrixZ );
+			worldPosition.w = dot4( modelPosition, rpModelMatrixW );
+
+			float4 toLightGlobal = rpGlobalLightOrigin - worldPosition;
+
+			result.texcoord8 = toLightGlobal;
+
+			float4 viewPosition;
+			viewPosition.x = dot4( modelPosition, rpModelViewMatrixX );
+			viewPosition.y = dot4( modelPosition, rpModelViewMatrixY );
+			viewPosition.z = dot4( modelPosition, rpModelViewMatrixZ );
+			viewPosition.w = dot4( modelPosition, rpModelViewMatrixW );
+
+			result.texcoord9 = viewPosition;
+
+		#if defined( USE_GPU_SKINNING )
+			// for joint transformation of the tangent space, we use color and
+			// color2 for weighting information, so hopefully there aren't any
+			// effects that need vertex color...
+			result.color = float4( 1.0f, 1.0f, 1.0f, 1.0f );
+		#else
+			//# generate the vertex color, which can be 1.0, color, or 1.0 - color
+			//# for 1.0 : env[16] = 0, env[17] = 1
+			//# for color : env[16] = 1, env[17] = 0
+			//# for 1.0-color : env[16] = -1, env[17] = 1
+			result.color = ( swizzleColor( vertex.color ) * rpVertexColorModulate ) + rpVertexColorAdd;
+		#endif
 		}
 	}
-
-#endif // #if defined( POINTLIGHT )
-
-#if defined( LIGHT_PARALLEL )
-
-	float viewZ = -fragment.texcoord9.z;
-
-	shadowIndex = 4;
-	for( int i = 0; i < 4; i++ )
-	{
-		if( viewZ < rpCascadeDistances[i] )
+	hlsl_fp {
+		// Normal Distribution Function ( NDF ) or D( h )
+		// GGX ( Trowbridge-Reitz )
+		half Distribution_GGX( half hdotN, half alpha )
 		{
-			shadowIndex = i;
-			break;
+			// alpha is assumed to be roughness^2
+			float a2 = alpha * alpha;
+			//float tmp = ( hdotN * hdotN ) * ( a2 - 1.0 ) + 1.0;
+			float tmp = ( hdotN * a2 - hdotN ) * hdotN + 1.0;
+
+			return ( a2 / ( PI * tmp * tmp ) );
 		}
-	}
-#endif
-
-#if 0
-	if( shadowIndex == 0 )
-	{
-		result.color = float4( 1.0, 0.0, 0.0, 1.0 );
-	}
-	else if( shadowIndex == 1 )
-	{
-		result.color = float4( 0.0, 1.0, 0.0, 1.0 );
-	}
-	else if( shadowIndex == 2 )
-	{
-		result.color = float4( 0.0, 0.0, 1.0, 1.0 );
-	}
-	else if( shadowIndex == 3 )
-	{
-		result.color = float4( 1.0, 1.0, 0.0, 1.0 );
-	}
-	else if( shadowIndex == 4 )
-	{
-		result.color = float4( 1.0, 0.0, 1.0, 1.0 );
-	}
-	else if( shadowIndex == 5 )
-	{
-		result.color = float4( 0.0, 1.0, 1.0, 1.0 );
-	}
-
-	//result.color.xyz *= lightColor;
-	return;
-#endif
-
-	float4 shadowMatrixX = rpShadowMatrices[ int ( shadowIndex * 4 + 0 ) ];
-	float4 shadowMatrixY = rpShadowMatrices[ int ( shadowIndex * 4 + 1 ) ];
-	float4 shadowMatrixZ = rpShadowMatrices[ int ( shadowIndex * 4 + 2 ) ];
-	float4 shadowMatrixW = rpShadowMatrices[ int ( shadowIndex * 4 + 3 ) ];
-
-	float4 modelPosition = float4( fragment.texcoord7.xyz, 1.0 );
-	float4 shadowTexcoord;
-	shadowTexcoord.x = dot4( modelPosition, shadowMatrixX );
-	shadowTexcoord.y = dot4( modelPosition, shadowMatrixY );
-	shadowTexcoord.z = dot4( modelPosition, shadowMatrixZ );
-	shadowTexcoord.w = dot4( modelPosition, shadowMatrixW );
-
-	float bias = 0.001 * tan( acos( ldotN ) );
-	bias = clamp( bias, 0, 0.01 ); //GK: Putting that limit seems to resolve shadow acne but still many shadows are missing
-	//float bias = 0.001;
-
-	shadowTexcoord.xyz /= shadowTexcoord.w;
-
-	shadowTexcoord.z = shadowTexcoord.z * rpScreenCorrectionFactor.w;
-	//shadowTexcoord.z = shadowTexcoord.z * 0.999991;
-	shadowTexcoord.z = shadowTexcoord.z - bias;
-	shadowTexcoord.w = float( shadowIndex );
-
-#if 0
-	result.color.xyz = float3( shadowTexcoord.z, shadowTexcoord.z, shadowTexcoord.z );
-	result.color.w = 1.0;
-	return;
-#endif
-
-	// multiple taps
-
-#if 0
-	float4 base = shadowTexcoord;
-
-	base.xy += rpJitterTexScale.xy * -0.5;
-
-	float shadow = 0.0;
-
-	//float stepSize = 1.0 / 16.0;
-	float numSamples = 16;
-	float stepSize = 1.0 / numSamples;
-
-	float2 jitterTC = ( fragment.position.xy * rpScreenCorrectionFactor.xy ) + rpJitterTexOffset.ww;
-	for( float i = 0.0; i < numSamples; i += 1.0 )
-	{
-		float4 jitter = base + tex2D( samp6, jitterTC.xy ) * rpJitterTexScale;
-		jitter.zw = shadowTexcoord.zw;
-
-		shadow += texture( samp5, jitter.xywz );
-		jitterTC.x += stepSize;
-	}
-
-	shadow *= stepSize;
-
-
-#elif 0
-
-	// Poisson Disk with White Noise used for years int RBDOOM-3-BFG
-
-	const float2 poissonDisk[12] = float2[](
-									   float2( 0.6111618, 0.1050905 ),
-									   float2( 0.1088336, 0.1127091 ),
-									   float2( 0.3030421, -0.6292974 ),
-									   float2( 0.4090526, 0.6716492 ),
-									   float2( -0.1608387, -0.3867823 ),
-									   float2( 0.7685862, -0.6118501 ),
-									   float2( -0.1935026, -0.856501 ),
-									   float2( -0.4028573, 0.07754025 ),
-									   float2( -0.6411021, -0.4748057 ),
-									   float2( -0.1314865, 0.8404058 ),
-									   float2( -0.7005203, 0.4596822 ),
-									   float2( -0.9713828, -0.06329931 ) );
 
-	float shadow = 0.0;
-
-	// RB: casting a float to int and using it as index can really kill the performance ...
-	float numSamples = 12.0; //int(rpScreenCorrectionFactor.w);
-	float stepSize = 1.0 / numSamples;
-
-	float4 jitterTC = ( fragment.position * rpScreenCorrectionFactor ) + rpJitterTexOffset;
-	float4 random = tex2D( samp6, jitterTC.xy ) * PI;
-	//float4 random = fragment.position;
-
-	float2 rot;
-	rot.x = cos( random.x );
-	rot.y = sin( random.x );
-
-	float shadowTexelSize = rpScreenCorrectionFactor.z * rpJitterTexScale.x;
-	for( int i = 0; i < 12; i++ )
-	{
-		float2 jitter = poissonDisk[i];
-		float2 jitterRotated;
-		jitterRotated.x = jitter.x * rot.x - jitter.y * rot.y;
-		jitterRotated.y = jitter.x * rot.y + jitter.y * rot.x;
-
-		float4 shadowTexcoordJittered = float4( shadowTexcoord.xy + jitterRotated * shadowTexelSize, shadowTexcoord.z, shadowTexcoord.w );
-
-		shadow += texture( samp5, shadowTexcoordJittered.xywz );
-	}
-
-	shadow *= stepSize;
-
-#elif 1
-
-#if 0
-
-	// Poisson Disk with animated Blue Noise or Interleaved Gradient Noise
-
-	const float2 poissonDisk[12] = float2[](
-									   float2( 0.6111618, 0.1050905 ),
-									   float2( 0.1088336, 0.1127091 ),
-									   float2( 0.3030421, -0.6292974 ),
-									   float2( 0.4090526, 0.6716492 ),
-									   float2( -0.1608387, -0.3867823 ),
-									   float2( 0.7685862, -0.6118501 ),
-									   float2( -0.1935026, -0.856501 ),
-									   float2( -0.4028573, 0.07754025 ),
-									   float2( -0.6411021, -0.4748057 ),
-									   float2( -0.1314865, 0.8404058 ),
-									   float2( -0.7005203, 0.4596822 ),
-									   float2( -0.9713828, -0.06329931 ) );
-
-	float shadow = 0.0;
-
-	// RB: casting a float to int and using it as index can really kill the performance ...
-	float numSamples = 6.0;
-	float stepSize = 1.0 / numSamples;
-
-	float random = BlueNoise( fragment.position.xy, 1.0 );
-	//float random = InterleavedGradientNoiseAnim( fragment.position.xy, rpJitterTexOffset.w );
-
-	random *= PI;
-
-	float2 rot;
-	rot.x = cos( random );
-	rot.y = sin( random );
-
-	float shadowTexelSize = rpScreenCorrectionFactor.z * rpJitterTexScale.x;
-	for( int i = 0; i < 6; i++ )
-	{
-		float2 jitter = poissonDisk[i];
-		float2 jitterRotated;
-		jitterRotated.x = jitter.x * rot.x - jitter.y * rot.y;
-		jitterRotated.y = jitter.x * rot.y + jitter.y * rot.x;
-
-		float4 shadowTexcoordJittered = float4( shadowTexcoord.xy + jitterRotated * shadowTexelSize, shadowTexcoord.z, shadowTexcoord.w );
-
-		shadow += texture( samp5, shadowTexcoordJittered.xywz );
-	}
-
-	shadow *= stepSize;
-
-
-#else
-
-	// Vogel Disk Sampling
-	// https://twitter.com/panoskarabelas1/status/1222663889659355140
-
-	// this approach is more dynamic and can be controlled by r_shadowMapSamples
-
-	float shadow = 0.0;
-
-	float numSamples = rpJitterTexScale.w;
-	float stepSize = 1.0 / numSamples;
-
-	float vogelPhi = BlueNoise( fragment.position.xy, 1.0 );
-	//float vogelPhi = InterleavedGradientNoiseAnim( fragment.position.xy, rpJitterTexOffset.w );
-
-	float shadowTexelSize = rpScreenCorrectionFactor.z * rpJitterTexScale.x;
-	for( float i = 0.0; i < numSamples; i += 1.0 )
-	{
-		float2 jitter = VogelDiskSample( i, numSamples, vogelPhi );
-
-		float4 shadowTexcoordJittered = float4( shadowTexcoord.xy + jitter * shadowTexelSize, shadowTexcoord.z, shadowTexcoord.w );
-
-		shadow += texture( samp5, shadowTexcoordJittered.xywz );
-	}
-
-	shadow *= stepSize;
-#endif
-
-#else
-
-	float shadow = texture( samp5, shadowTexcoord.xywz );
-#endif
-
-
-	half3 halfAngleVector = normalize( lightVector + viewVector );
-	half hdotN = clamp( dot3( halfAngleVector, localNormal ), 0.0, 1.0 );
-
-#if defined( USE_PBR )
-	const half metallic = specMapSRGB.g;
-	const half roughness = specMapSRGB.r;
-	const half glossiness = 1.0 - roughness;
-
-	// the vast majority of real-world materials (anything not metal or gems) have F(0�)
-	// values in a very narrow range (~0.02 - 0.08)
-
-	// approximate non-metals with linear RGB 0.04 which is 0.08 * 0.5 (default in UE4)
-	const half3 dielectricColor = half3( 0.04 );
-
-	// derive diffuse and specular from albedo(m) base color
-	const half3 baseColor = diffuseMap;
-
-	half3 diffuseColor = baseColor * ( 1.0 - metallic );
-	half3 specularColor = lerp( dielectricColor, baseColor, metallic );
-#else
-	const float roughness = EstimateLegacyRoughness( specMapSRGB.rgb );
-
-	half3 diffuseColor = diffuseMap;
-	half3 specularColor = specMapSRGB.rgb; // RB: should be linear but it looks too flat
-#endif
-
-
-	// RB: compensate r_lightScale 3 and the division of Pi
-	//lambert *= 1.3;
-
-	// rpDiffuseModifier contains light color multiplier
-	half3 lightColor = sRGBToLinearRGB( lightProj.xyz * lightFalloff.xyz );
-
-	half vdotN = clamp( dot3( viewVector, localNormal ), 0.0, 1.0 );
-	half vdotH = clamp( dot3( viewVector, halfAngleVector ), 0.0, 1.0 );
-	half ldotH = clamp( dot3( lightVector, halfAngleVector ), 0.0, 1.0 );
-
-	// compensate r_lightScale 3 * 2
-	half3 reflectColor = specularColor * rpSpecularModifier.rgb * 1.0;// * 0.5;
-
-	// cheap approximation by ARM with only one division
-	// http://community.arm.com/servlet/JiveServlet/download/96891546-19496/siggraph2015-mmg-renaldas-slides.pdf
-	// page 26
-
-	float rr = roughness * roughness;
-	float rrrr = rr * rr;
-
-	// disney GGX
-	float D = ( hdotN * hdotN ) * ( rrrr - 1.0 ) + 1.0;
-	float VFapprox = ( ldotH * ldotH ) * ( roughness + 0.5 );
-	half3 specularLight = ( rrrr / ( 4.0 * PI * D * D * VFapprox ) ) * ldotN * reflectColor;
-	//specularLight = half3( 0.0 );
-
-#if 0
-	result.color = float4( _half3( VFapprox ), 1.0 );
-	return;
-#endif
-
-	// see http://seblagarde.wordpress.com/2012/01/08/pi-or-not-to-pi-in-game-lighting-equation/
-	//lambert /= PI;
-
-	//half3 diffuseColor = mix( diffuseMap, F0, metal ) * rpDiffuseModifier.xyz;
-	half3 diffuseLight = diffuseColor * lambert * ( rpDiffuseModifier.xyz );
-
-	// layers
-	half4 layerMap = tex2D( samp7, fragment.texcoord5.xy );
-	float coatWeight = layerMap.r;
-	float coatRoughness = max( layerMap.g, 0.045 );
-	half3 sheenColor = diffuseColor * layerMap.b;
-	float sheenRoughness = max( layerMap.a, 0.07 );
-	half NdotV = clamp( dot3( localNormal, viewVector ), 0.001, 1.0 );
-	half3 coatBRDF  = EvaluateCoat( coatWeight, coatRoughness, ldotN, NdotV, hdotN, vdotH );
-	float baseAtten = CoatAttenuation( coatWeight, NdotV );
-	half3 sheenBRDF = EvaluateSheen( sheenColor, sheenRoughness, ldotN, NdotV, hdotN );
-	half3 baseLayer = ( diffuseLight + specularLight ) * baseAtten;
-
-	float3 color = ( baseLayer + sheenBRDF * lambert + coatBRDF ) * lightColor * fragment.color.rgb * shadow;
-
-	result.color.rgb = color;
-	result.color.a = 1.0;
-}
+		half Distribution_GGX_Disney( half hdotN, half alphaG )
+		{
+			float a2 = alphaG * alphaG;
+			float tmp = ( hdotN * hdotN ) * ( a2 - 1.0 ) + 1.0;
+			//tmp *= tmp;
+
+			return ( a2 / ( PI * tmp ) );
+		}
+
+		half Distribution_GGX_1886( half hdotN, half alpha )
+		{
+			// alpha is assumed to be roughness^2
+			return ( alpha / ( PI * pow( hdotN * hdotN * ( alpha - 1.0 ) + 1.0, 2.0 ) ) );
+		}
+
+		// Fresnel term F( v, h )
+		// Fnone( v, h ) = F(0) = specularColor
+		half3 Fresnel_Schlick( half3 specularColor, half vDotN )
+		{
+			return specularColor + ( 1.0 - specularColor ) * pow( 1.0 - vDotN, 5.0 );
+		}
+
+		// Fresnel term that takes roughness into account so rough non-metal surfaces aren't too shiny [Lagarde11]
+		half3 Fresnel_SchlickRoughness( half3 specularColor, half vDotN, half roughness )
+		{
+			float oneMinusRoughness = 1.0 - roughness;
+			return specularColor + ( max( half3( oneMinusRoughness, oneMinusRoughness, oneMinusRoughness ), specularColor ) - specularColor ) * pow( 1.0 - vDotN, 5.0 );
+		}
+
+		// Sebastien Lagarde proposes an empirical approach to derive the specular occlusion term from the diffuse occlusion term in [Lagarde14].
+		// The result does not have any physical basis but produces visually pleasant results.
+		// See Sebastien Lagarde and Charles de Rousiers. 2014. Moving Frostbite to PBR.
+		float ComputeSpecularAO( float vDotN, float ao, float roughness )
+		{
+			return clamp( pow( vDotN + ao, exp2( -16.0 * roughness - 1.0 ) ) - 1.0 + ao, 0.0, 1.0 );
+		}
+
+		// Visibility term G( l, v, h )
+		// Very similar to Marmoset Toolbag 2 and gives almost the same results as Smith GGX
+		float Visibility_Schlick( half vdotN, half ldotN, float alpha )
+		{
+			float k = alpha * 0.5;
+
+			float schlickL = ( ldotN * ( 1.0 - k ) + k );
+			float schlickV = ( vdotN * ( 1.0 - k ) + k );
+
+			return ( 0.25 / ( schlickL * schlickV ) );
+			//return ( ( schlickL * schlickV ) / ( 4.0 * vdotN * ldotN ) );
+		}
+
+		// see s2013_pbs_rad_notes.pdf
+		// Crafting a Next-Gen Material Pipeline for The Order: 1886
+		// this visibility function also provides some sort of back lighting
+		float Visibility_SmithGGX( half vdotN, half ldotN, float alpha )
+		{
+			// alpha is already roughness^2
+
+			float V1 = ldotN + sqrt( alpha + ( 1.0 - alpha ) * ldotN * ldotN );
+			float V2 = vdotN + sqrt( alpha + ( 1.0 - alpha ) * vdotN * vdotN );
+
+			// RB: avoid too bright spots
+			return ( 1.0 / max( V1 * V2, 0.15 ) );
+		}
+
+		// HACK calculate roughness from D3 gloss maps
+		float EstimateLegacyRoughness( float3 specMapSRGB )
+		{
+			float Y = dot( LUMINANCE_SRGB.rgb, specMapSRGB );
+
+			//float glossiness = clamp( 1.0 - specMapSRGB.r, 0.0, 0.98 );
+			float glossiness = clamp( pow( Y, 1.0 / 2.0 ), 0.0, 0.98 );
+
+			float roughness = 1.0 - glossiness;
+
+			return roughness;
+		}
+
+		// Environment BRDF approximations
+		// see s2013_pbs_black_ops_2_notes.pdf
+		/*
+		half a1vf( half g )
+		{
+			return ( 0.25 * g + 0.75 );
+		}
+
+		half a004( half g, half vdotN )
+		{
+			float t = min( 0.475 * g, exp2( -9.28 * vdotN ) );
+			return ( t + 0.0275 ) * g + 0.015;
+		}
+
+		half a0r( half g, half vdotN )
+		{
+			return ( ( a004( g, vdotN ) - a1vf( g ) * 0.04 ) / 0.96 );
+		}
+
+		float3 EnvironmentBRDF( half g, half vdotN, float3 rf0 )
+		{
+			float4 t = float4( 1.0 / 0.96, 0.475, ( 0.0275 - 0.25 * 0.04 ) / 0.96, 0.25 );
+			t *= float4( g, g, g, g );
+			t += float4( 0.0, 0.0, ( 0.015 - 0.75 * 0.04 ) / 0.96, 0.75 );
+			half a0 = t.x * min( t.y, exp2( -9.28 * vdotN ) ) + t.z;
+			half a1 = t.w;
+
+			return saturate( a0 + rf0 * ( a1 - a0 ) );
+		}
+
+		half3 EnvironmentBRDFApprox( half roughness, half vdotN, half3 specularColor )
+		{
+			const half4 c0 = half4( -1, -0.0275, -0.572, 0.022 );
+			const half4 c1 = half4( 1, 0.0425, 1.04, -0.04 );
+
+			half4 r = roughness * c0 + c1;
+			half a004 = min( r.x * r.x, exp2( -9.28 * vdotN ) ) * r.x + r.y;
+			half2 AB = half2( -1.04, 1.04 ) * a004 + r.zw;
+
+			return specularColor * AB.x + AB.y;
+		}
+		*/
+
+		// *INDENT-OFF*
+		uniform sampler2D				samp0 : register(s0); // texture 1 is the per-surface normal map
+		uniform sampler2D				samp1 : register(s1); // texture 3 is the per-surface specular or roughness/metallic/AO mixer map
+		uniform sampler2D				samp2 : register(s2); // texture 2 is the per-surface baseColor map
+		uniform sampler2D				samp3 : register(s3); // texture 4 is the light falloff texture
+		uniform sampler2D				samp4 : register(s4); // texture 5 is the light projection texture
+		uniform sampler2DArrayShadow	samp5 : register(s5); // texture 6 is the shadowmap array
+		uniform sampler2D				samp6 : register(s6); // texture 7 is the jitter texture
+		uniform sampler2D				samp7 : register(s7); // texture 8 is the layer map
+
+		struct PS_IN
+		{
+			half4 position		: VPOS;
+			half4 texcoord0		: TEXCOORD0;
+			half4 texcoord1		: TEXCOORD1;
+			half4 texcoord2		: TEXCOORD2;
+			half4 texcoord3		: TEXCOORD3;
+			half4 texcoord4		: TEXCOORD4;
+			half4 texcoord5		: TEXCOORD5;
+			half4 texcoord6		: TEXCOORD6;
+			half4 texcoord7		: TEXCOORD7;
+			half4 texcoord8		: TEXCOORD8;
+			half4 texcoord9		: TEXCOORD9;
+			half4 color			: COLOR0;
+		};
+
+		struct PS_OUT
+		{
+			half4 color : COLOR;
+		};
+		// *INDENT-ON*
+
+		float BlueNoise( float2 n, float x )
+		{
+			float2 uv = n.xy * rpJitterTexOffset.xy;
+
+			float noise = tex2D( samp6, uv ).r;
+
+			noise = fract( noise + c_goldenRatioConjugate * rpJitterTexOffset.w * x );
+
+			//noise = RemapNoiseTriErp( noise );
+			//noise = noise * 2.0 - 0.5;
+
+			return noise;
+		}
+
+		float2 VogelDiskSample( float sampleIndex, float samplesCount, float phi )
+		{
+			float goldenAngle = 2.4f;
+
+			float r = sqrt( sampleIndex + 0.5f ) / sqrt( samplesCount );
+			float theta = sampleIndex * goldenAngle + phi;
+
+			float sine = sin( theta );
+			float cosine = cos( theta );
+
+			return float2( r * cosine, r * sine );
+		}
+
+		// Sheen (Zeltner et al. 2022 Charlie NDF)
+		float SheenLookup( float x, float alphaG )
+		{
+			float oneMinusAlphaSq = ( 1.0 - alphaG ) * ( 1.0 - alphaG );
+			float a = lerp( 25.3245, 21.5473, oneMinusAlphaSq );
+			float b = lerp( 3.3244,  3.8299, oneMinusAlphaSq );
+			float c = lerp( 0.1680,  0.1982, oneMinusAlphaSq );
+			float d = lerp( -1.2739, -1.9736, oneMinusAlphaSq );
+			float e = lerp( -4.8597, -4.3205, oneMinusAlphaSq );
+			return a / ( 1.0 + b * pow( abs( x ), c ) ) + d * x + e;
+		}
+
+		float D_Charlie( float roughness, float NdotH )
+		{
+			float alpha    = roughness * roughness;
+			float invAlpha = 1.0 / max( alpha, 0.001 );
+			float sin2h    = max( 1.0 - NdotH * NdotH, 0.0078125 );
+			return ( 2.0 + invAlpha ) * pow( sin2h, invAlpha * 0.5 ) / ( 2.0 * PI );
+		}
+
+		float V_Sheen( float NdotL, float NdotV, float roughness )
+		{
+			float alphaG  = roughness * roughness;
+			float lambdaV = exp( SheenLookup( NdotV, alphaG ) );
+			float lambdaL = exp( SheenLookup( NdotL, alphaG ) );
+			return 1.0 / ( ( 1.0 + lambdaV + lambdaL ) * ( 4.0 * max( NdotV * NdotL, 0.0001 ) ) );
+		}
+
+		half3 EvaluateSheen( half3 sheenColor, float sheenRoughness, float NdotL, float NdotV, float NdotH )
+		{
+			if( dot( sheenColor, sheenColor ) < 0.0001 )
+			{
+				return half3( 0.0, 0.0, 0.0 );
+			}
+			float D = D_Charlie( sheenRoughness, NdotH );
+			float V = V_Sheen( NdotL, NdotV, sheenRoughness );
+			return sheenColor * D * V;
+		}
+
+		// Coat (GGX clearcoat, IOR 1.5, F0 = 0.04)
+		half3 EvaluateCoat( float coatWeight, float coatRoughness, float NdotL, float NdotV, float NdotH, float VdotH )
+		{
+			if( coatWeight < 0.001 )
+			{
+				return half3( 0.0, 0.0, 0.0 );
+			}
+
+			float alpha  = coatRoughness * coatRoughness;
+			float alpha2 = alpha * alpha;
+			float denom  = NdotH * NdotH * ( alpha2 - 1.0 ) + 1.0;
+			float D      = alpha2 / ( PI * denom * denom );
+
+			float k  = ( coatRoughness + 1.0 );
+			float k2 = ( k * k ) / 8.0;
+			float GV = NdotV / ( NdotV * ( 1.0 - k2 ) + k2 );
+			float GL = NdotL / ( NdotL * ( 1.0 - k2 ) + k2 );
+			float G  = GV * GL;
+
+			float Fc    = pow( 1.0 - VdotH, 5.0 );
+			float3 Fcoat = float3( 0.04 + ( 1.0 - 0.04 ) * Fc );
+
+			return coatWeight * Fcoat * D * G / max( 4.0 * NdotL * NdotV, 0.0001 );
+		}
+
+		float CoatAttenuation( float coatWeight, float NdotV )
+		{
+			float Fc = pow( 1.0 - NdotV, 5.0 );
+			float F  = 0.04 + ( 1.0 - 0.04 ) * Fc;
+			return 1.0 - coatWeight * F;
+		}
+
+		void main( PS_IN fragment, out PS_OUT result )
+		{
+			half4 bumpMap =			tex2D( samp0, fragment.texcoord1.xy );
+			half4 lightFalloff =	( idtex2Dproj( samp3, fragment.texcoord2 ) );
+			half4 lightProj	= ( idtex2Dproj( samp4, fragment.texcoord3 ) );
+			half4 YCoCG =			tex2D( samp2, fragment.texcoord4.xy );
+			half4 specMapSRGB =		tex2D( samp1, fragment.texcoord5.xy );
+			half4 specMap =			sRGBAToLinearRGBA( specMapSRGB );
+
+			half3 lightVector = normalize( fragment.texcoord0.xyz );
+			half3 viewVector = normalize( fragment.texcoord6.xyz );
+			half3 diffuseMap = sRGBToLinearRGB( ConvertYCoCgToRGB( YCoCG ) );
+
+			half3 localNormal;
+			// RB begin
+		#if defined(USE_NORMAL_FMT_RGB8)
+			localNormal.xy = bumpMap.rg - 0.5;
+		#else
+			localNormal.xy = bumpMap.wy - 0.5;
+		#endif
+			// RB end
+			localNormal.z = sqrt( abs( dot( localNormal.xy, localNormal.xy ) - 0.25 ) );
+			localNormal = normalize( localNormal );
+
+			// traditional very dark Lambert light model used in Doom 3
+			half ldotN = saturate( dot3( localNormal, lightVector ) );
+
+		#if defined(USE_HALF_LAMBERT)
+			// RB: http://developer.valvesoftware.com/wiki/Half_Lambert
+			half halfLdotN = dot3( localNormal, lightVector ) * 0.5 + 0.5;
+			halfLdotN *= halfLdotN;
+
+			// tweak to not loose so many details
+			half lambert = lerp( ldotN, halfLdotN, 0.5 );
+		#else
+			half lambert = ldotN;
+		#endif
+
+			//
+			// shadow mapping
+			//
+			int shadowIndex = 0;
+
+		#if defined( LIGHT_POINT )
+			float3 toLightGlobal = normalize( fragment.texcoord8.xyz );
+
+			float axis[6];
+			axis[0] = -toLightGlobal.x;
+			axis[1] =  toLightGlobal.x;
+			axis[2] = -toLightGlobal.y;
+			axis[3] =  toLightGlobal.y;
+			axis[4] = -toLightGlobal.z;
+			axis[5] =  toLightGlobal.z;
+
+			for( int i = 0; i < 6; i++ )
+			{
+				if( axis[i] > axis[shadowIndex] )
+				{
+					shadowIndex = i;
+				}
+			}
+
+		#endif // #if defined( POINTLIGHT )
+
+		#if defined( LIGHT_PARALLEL )
+
+			float viewZ = -fragment.texcoord9.z;
+
+			shadowIndex = 4;
+			for( int i = 0; i < 4; i++ )
+			{
+				if( viewZ < rpCascadeDistances[i] )
+				{
+					shadowIndex = i;
+					break;
+				}
+			}
+		#endif
+
+		#if 0
+			if( shadowIndex == 0 )
+			{
+				result.color = float4( 1.0, 0.0, 0.0, 1.0 );
+			}
+			else if( shadowIndex == 1 )
+			{
+				result.color = float4( 0.0, 1.0, 0.0, 1.0 );
+			}
+			else if( shadowIndex == 2 )
+			{
+				result.color = float4( 0.0, 0.0, 1.0, 1.0 );
+			}
+			else if( shadowIndex == 3 )
+			{
+				result.color = float4( 1.0, 1.0, 0.0, 1.0 );
+			}
+			else if( shadowIndex == 4 )
+			{
+				result.color = float4( 1.0, 0.0, 1.0, 1.0 );
+			}
+			else if( shadowIndex == 5 )
+			{
+				result.color = float4( 0.0, 1.0, 1.0, 1.0 );
+			}
+
+			//result.color.xyz *= lightColor;
+			return;
+		#endif
+
+			float4 shadowMatrixX = rpShadowMatrices[ int ( shadowIndex * 4 + 0 ) ];
+			float4 shadowMatrixY = rpShadowMatrices[ int ( shadowIndex * 4 + 1 ) ];
+			float4 shadowMatrixZ = rpShadowMatrices[ int ( shadowIndex * 4 + 2 ) ];
+			float4 shadowMatrixW = rpShadowMatrices[ int ( shadowIndex * 4 + 3 ) ];
+
+			float4 modelPosition = float4( fragment.texcoord7.xyz, 1.0 );
+			float4 shadowTexcoord;
+			shadowTexcoord.x = dot4( modelPosition, shadowMatrixX );
+			shadowTexcoord.y = dot4( modelPosition, shadowMatrixY );
+			shadowTexcoord.z = dot4( modelPosition, shadowMatrixZ );
+			shadowTexcoord.w = dot4( modelPosition, shadowMatrixW );
+
+			float bias = 0.001 * tan( acos( ldotN ) );
+			bias = clamp( bias, 0, 0.01 ); //GK: Putting that limit seems to resolve shadow acne but still many shadows are missing
+			//float bias = 0.001;
+
+			shadowTexcoord.xyz /= shadowTexcoord.w;
+
+			shadowTexcoord.z = shadowTexcoord.z * rpScreenCorrectionFactor.w;
+			//shadowTexcoord.z = shadowTexcoord.z * 0.999991;
+			shadowTexcoord.z = shadowTexcoord.z - bias;
+			shadowTexcoord.w = float( shadowIndex );
+
+		#if 0
+			result.color.xyz = float3( shadowTexcoord.z, shadowTexcoord.z, shadowTexcoord.z );
+			result.color.w = 1.0;
+			return;
+		#endif
+
+			// multiple taps
+
+		#if 0
+			float4 base = shadowTexcoord;
+
+			base.xy += rpJitterTexScale.xy * -0.5;
+
+			float shadow = 0.0;
+
+			//float stepSize = 1.0 / 16.0;
+			float numSamples = 16;
+			float stepSize = 1.0 / numSamples;
+
+			float2 jitterTC = ( fragment.position.xy * rpScreenCorrectionFactor.xy ) + rpJitterTexOffset.ww;
+			for( float i = 0.0; i < numSamples; i += 1.0 )
+			{
+				float4 jitter = base + tex2D( samp6, jitterTC.xy ) * rpJitterTexScale;
+				jitter.zw = shadowTexcoord.zw;
+
+				shadow += texture( samp5, jitter.xywz );
+				jitterTC.x += stepSize;
+			}
+
+			shadow *= stepSize;
+
+		#elif 0
+
+			// Poisson Disk with White Noise used for years int RBDOOM-3-BFG
+
+			const float2 poissonDisk[12] = float2[](
+											   float2( 0.6111618, 0.1050905 ),
+											   float2( 0.1088336, 0.1127091 ),
+											   float2( 0.3030421, -0.6292974 ),
+											   float2( 0.4090526, 0.6716492 ),
+											   float2( -0.1608387, -0.3867823 ),
+											   float2( 0.7685862, -0.6118501 ),
+											   float2( -0.1935026, -0.856501 ),
+											   float2( -0.4028573, 0.07754025 ),
+											   float2( -0.6411021, -0.4748057 ),
+											   float2( -0.1314865, 0.8404058 ),
+											   float2( -0.7005203, 0.4596822 ),
+											   float2( -0.9713828, -0.06329931 ) );
+
+			float shadow = 0.0;
+
+			// RB: casting a float to int and using it as index can really kill the performance ...
+			float numSamples = 12.0; //int(rpScreenCorrectionFactor.w);
+			float stepSize = 1.0 / numSamples;
+
+			float4 jitterTC = ( fragment.position * rpScreenCorrectionFactor ) + rpJitterTexOffset;
+			float4 random = tex2D( samp6, jitterTC.xy ) * PI;
+			//float4 random = fragment.position;
+
+			float2 rot;
+			rot.x = cos( random.x );
+			rot.y = sin( random.x );
+
+			float shadowTexelSize = rpScreenCorrectionFactor.z * rpJitterTexScale.x;
+			for( int i = 0; i < 12; i++ )
+			{
+				float2 jitter = poissonDisk[i];
+				float2 jitterRotated;
+				jitterRotated.x = jitter.x * rot.x - jitter.y * rot.y;
+				jitterRotated.y = jitter.x * rot.y + jitter.y * rot.x;
+
+				float4 shadowTexcoordJittered = float4( shadowTexcoord.xy + jitterRotated * shadowTexelSize, shadowTexcoord.z, shadowTexcoord.w );
+
+				shadow += texture( samp5, shadowTexcoordJittered.xywz );
+			}
+
+			shadow *= stepSize;
+
+		#elif 1
+
+		#if 0
+
+			// Poisson Disk with animated Blue Noise or Interleaved Gradient Noise
+
+			const float2 poissonDisk[12] = float2[](
+											   float2( 0.6111618, 0.1050905 ),
+											   float2( 0.1088336, 0.1127091 ),
+											   float2( 0.3030421, -0.6292974 ),
+											   float2( 0.4090526, 0.6716492 ),
+											   float2( -0.1608387, -0.3867823 ),
+											   float2( 0.7685862, -0.6118501 ),
+											   float2( -0.1935026, -0.856501 ),
+											   float2( -0.4028573, 0.07754025 ),
+											   float2( -0.6411021, -0.4748057 ),
+											   float2( -0.1314865, 0.8404058 ),
+											   float2( -0.7005203, 0.4596822 ),
+											   float2( -0.9713828, -0.06329931 ) );
+
+			float shadow = 0.0;
+
+			// RB: casting a float to int and using it as index can really kill the performance ...
+			float numSamples = 6.0;
+			float stepSize = 1.0 / numSamples;
+
+			float random = BlueNoise( fragment.position.xy, 1.0 );
+			//float random = InterleavedGradientNoiseAnim( fragment.position.xy, rpJitterTexOffset.w );
+
+			random *= PI;
+
+			float2 rot;
+			rot.x = cos( random );
+			rot.y = sin( random );
+
+			float shadowTexelSize = rpScreenCorrectionFactor.z * rpJitterTexScale.x;
+			for( int i = 0; i < 6; i++ )
+			{
+				float2 jitter = poissonDisk[i];
+				float2 jitterRotated;
+				jitterRotated.x = jitter.x * rot.x - jitter.y * rot.y;
+				jitterRotated.y = jitter.x * rot.y + jitter.y * rot.x;
+
+				float4 shadowTexcoordJittered = float4( shadowTexcoord.xy + jitterRotated * shadowTexelSize, shadowTexcoord.z, shadowTexcoord.w );
+
+				shadow += texture( samp5, shadowTexcoordJittered.xywz );
+			}
+
+			shadow *= stepSize;
+
+		#else
+
+			// Vogel Disk Sampling
+			// https://twitter.com/panoskarabelas1/status/1222663889659355140
+
+			// this approach is more dynamic and can be controlled by r_shadowMapSamples
+
+			float shadow = 0.0;
+
+			float numSamples = rpJitterTexScale.w;
+			float stepSize = 1.0 / numSamples;
+
+			float vogelPhi = BlueNoise( fragment.position.xy, 1.0 );
+			//float vogelPhi = InterleavedGradientNoiseAnim( fragment.position.xy, rpJitterTexOffset.w );
+
+			float shadowTexelSize = rpScreenCorrectionFactor.z * rpJitterTexScale.x;
+			for( float i = 0.0; i < numSamples; i += 1.0 )
+			{
+				float2 jitter = VogelDiskSample( i, numSamples, vogelPhi );
+
+				float4 shadowTexcoordJittered = float4( shadowTexcoord.xy + jitter * shadowTexelSize, shadowTexcoord.z, shadowTexcoord.w );
+
+				shadow += texture( samp5, shadowTexcoordJittered.xywz );
+			}
+
+			shadow *= stepSize;
+		#endif
+
+		#else
+
+			float shadow = texture( samp5, shadowTexcoord.xywz );
+		#endif
+
+			half3 halfAngleVector = normalize( lightVector + viewVector );
+			half hdotN = clamp( dot3( halfAngleVector, localNormal ), 0.0, 1.0 );
+
+		#if defined( USE_PBR )
+			const half metallic = specMapSRGB.g;
+			const half roughness = specMapSRGB.r;
+			const half glossiness = 1.0 - roughness;
+
+			// the vast majority of real-world materials (anything not metal or gems) have F(0�)
+			// values in a very narrow range (~0.02 - 0.08)
+
+			// approximate non-metals with linear RGB 0.04 which is 0.08 * 0.5 (default in UE4)
+			const half3 dielectricColor = half3( 0.04 );
+
+			// derive diffuse and specular from albedo(m) base color
+			const half3 baseColor = diffuseMap;
+
+			half3 diffuseColor = baseColor * ( 1.0 - metallic );
+			half3 specularColor = lerp( dielectricColor, baseColor, metallic );
+		#else
+			const float roughness = EstimateLegacyRoughness( specMapSRGB.rgb );
+
+			half3 diffuseColor = diffuseMap;
+			half3 specularColor = specMapSRGB.rgb; // RB: should be linear but it looks too flat
+		#endif
+
+			// RB: compensate r_lightScale 3 and the division of Pi
+			//lambert *= 1.3;
+
+			// rpDiffuseModifier contains light color multiplier
+			half3 lightColor = sRGBToLinearRGB( lightProj.xyz * lightFalloff.xyz );
+
+			half vdotN = clamp( dot3( viewVector, localNormal ), 0.0, 1.0 );
+			half vdotH = clamp( dot3( viewVector, halfAngleVector ), 0.0, 1.0 );
+			half ldotH = clamp( dot3( lightVector, halfAngleVector ), 0.0, 1.0 );
+
+			// compensate r_lightScale 3 * 2
+			half3 reflectColor = specularColor * rpSpecularModifier.rgb * 1.0;// * 0.5;
+
+			// cheap approximation by ARM with only one division
+			// http://community.arm.com/servlet/JiveServlet/download/96891546-19496/siggraph2015-mmg-renaldas-slides.pdf
+			// page 26
+
+			float rr = roughness * roughness;
+			float rrrr = rr * rr;
+
+			// disney GGX
+			float D = ( hdotN * hdotN ) * ( rrrr - 1.0 ) + 1.0;
+			float VFapprox = ( ldotH * ldotH ) * ( roughness + 0.5 );
+			half3 specularLight = ( rrrr / ( 4.0 * PI * D * D * VFapprox ) ) * ldotN * reflectColor;
+			//specularLight = half3( 0.0 );
+
+		#if 0
+			result.color = float4( _half3( VFapprox ), 1.0 );
+			return;
+		#endif
+
+			// see http://seblagarde.wordpress.com/2012/01/08/pi-or-not-to-pi-in-game-lighting-equation/
+			//lambert /= PI;
+
+			//half3 diffuseColor = mix( diffuseMap, F0, metal ) * rpDiffuseModifier.xyz;
+			half3 diffuseLight = diffuseColor * lambert * ( rpDiffuseModifier.xyz );
+
+			// layers
+			half4 layerMap = tex2D( samp7, fragment.texcoord5.xy );
+			float coatWeight = layerMap.r;
+			float coatRoughness = max( layerMap.g, 0.045 );
+			half3 sheenColor = diffuseColor * layerMap.b;
+			float sheenRoughness = max( layerMap.a, 0.07 );
+			half NdotV = clamp( dot3( localNormal, viewVector ), 0.001, 1.0 );
+			half3 coatBRDF  = EvaluateCoat( coatWeight, coatRoughness, ldotN, NdotV, hdotN, vdotH );
+			float baseAtten = CoatAttenuation( coatWeight, NdotV );
+			half3 sheenBRDF = EvaluateSheen( sheenColor, sheenRoughness, ldotN, NdotV, hdotN );
+			half3 baseLayer = ( diffuseLight + specularLight ) * baseAtten;
+
+			float3 color = ( baseLayer + sheenBRDF * lambert + coatBRDF ) * lightColor * fragment.color.rgb * shadow;
+
+			result.color.rgb = color;
+			result.color.a = 1.0;
+		}
 	}
 }
