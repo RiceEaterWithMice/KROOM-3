@@ -12,19 +12,6 @@ This file is part of the Doom 3 BFG Edition GPL Source Code ("Doom 3 BFG Edition
 
 Doom 3 BFG Edition Source Code is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
-/*
-The OpenGL renderer resolves every shader through renderprog decls under
-platform/renderprogs; the legacy .vertex/.pixel manager below is only kept
-for the Vulkan backend.
-
-The decl backed manager is adapted from the Wolfenstein: The New Order
-render prog manager reconstructed under references/wolfnto-reversedengineered
-(renderprogmanager.h/.cpp). That material is decompiled proprietary code and
-is not GPL-compatible; this is a re-implementation on this engine's idlib.
-The integer based API of the legacy manager is kept so the backend code does
-not change.
-*/
-#if defined( USE_VULKAN )
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
@@ -49,7 +36,20 @@ If you have questions concerning this license or the applicable additional terms
 #include "RenderCommon.h"
 
 
-#if defined(USE_VULKAN)
+/*
+The OpenGL renderer resolves every shader through renderprog decls under
+platform/renderprogs; the legacy .vertex/.pixel manager below is only kept
+for the Vulkan backend.
+
+The decl backed manager is adapted from the Wolfenstein: The New Order
+render prog manager reconstructed under references/wolfnto-reversedengineered
+(renderprogmanager.h/.cpp). That material is decompiled proprietary code and
+is not GPL-compatible; this is a re-implementation on this engine's idlib.
+The integer based API of the legacy manager is kept so the backend code does
+not change.
+*/
+
+#if defined( USE_VULKAN )
 
 	extern idUniformBuffer emptyUBO;
 
@@ -57,7 +57,6 @@ If you have questions concerning this license or the applicable additional terms
 
 	void CreateDescriptorPools( VkDescriptorPool( &pools )[ NUM_FRAME_DATA ] );
 
-#endif
 
 
 idRenderProgManager renderProgManager;
