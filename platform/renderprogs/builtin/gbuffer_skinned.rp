@@ -35,6 +35,8 @@ If you have questions concerning this license or the applicable additional terms
  */
 
 renderProg builtin/gbuffer_skinned {
+#define USE_GPU_SKINNING 1
+
 	hlsl_vp {
 		#if defined( USE_GPU_SKINNING )
 		uniform matrices_ubo { float4 matrices[408]; };

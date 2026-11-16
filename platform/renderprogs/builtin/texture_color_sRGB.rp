@@ -35,6 +35,8 @@ If you have questions concerning this license or the applicable additional terms
  */
 
 renderProg builtin/texture_color_sRGB {
+#define USE_SRGB 1
+
 	hlsl_vp {
 		// *INDENT-OFF*
 		struct VS_IN {
