@@ -1,85 +1,4 @@
 /*
- * Generated from platform/renderprogs/builtin/texture_color.vs.hlsl and platform/renderprogs/builtin/texture_color.ps.hlsl
- * (RBDOOM-3-BFG GPL shader sources) for the renderprog decl system, whose
- * engine code is adapted from the Wolfenstein: The New Order decl
- * renderprog re-implementation on this engine's idlib.
- */
-
-renderProg builtin/texture_color_soft {
-#define USE_SOFT_PARTICLE 1
-
-	hlsl_vp {
-/*
-===========================================================================
-
-Doom 3 BFG Edition GPL Source Code
-Copyright (C) 1993-2012 id Software LLC, a ZeniMax Media company.
-
-This file is part of the Doom 3 BFG Edition GPL Source Code ("Doom 3 BFG Edition Source Code").
-
-Doom 3 BFG Edition Source Code is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-Doom 3 BFG Edition Source Code is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with Doom 3 BFG Edition Source Code.  If not, see <http://www.gnu.org/licenses/>.
-
-In addition, the Doom 3 BFG Edition Source Code is also subject to certain additional terms. You should have received a copy of these additional terms immediately following the terms and conditions of the GNU General Public License which accompanied the Doom 3 BFG Edition Source Code.  If not, please request a copy in writing from id Software at the address below.
-
-If you have questions concerning this license or the applicable additional terms, you may contact in writing id Software LLC, c/o ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
-
-===========================================================================
-*/
-
-
-
-// *INDENT-OFF*
-struct VS_IN {
-	float4 position : POSITION;
-	float2 texcoord : TEXCOORD0;
-	float4 normal : NORMAL;
-	float4 tangent : TANGENT;
-	float4 color : COLOR0;
-};
-
-struct VS_OUT {
-	float4 position : POSITION;
-	float2 texcoord0 : TEXCOORD0;
-	float4 color : COLOR0;
-};
-// *INDENT-ON*
-
-void main( VS_IN vertex, out VS_OUT result )
-{
-	result.position.x = dot4( vertex.position, rpMVPmatrixX );
-	result.position.y = dot4( vertex.position, rpMVPmatrixY );
-	result.position.z = dot4( vertex.position, rpMVPmatrixZ );
-	result.position.w = dot4( vertex.position, rpMVPmatrixW );
-
-	// compute oldschool texgen or multiply by texture matrix
-	BRANCH if( rpTexGen0Enabled.x > 0.0 )
-	{
-		result.texcoord0.x = dot4( vertex.position, rpTexGen0S );
-		result.texcoord0.y = dot4( vertex.position, rpTexGen0T );
-	}
-	else
-	{
-		result.texcoord0.x = dot4( vertex.texcoord.xy, rpTextureMatrixS );
-		result.texcoord0.y = dot4( vertex.texcoord.xy, rpTextureMatrixT );
-	}
-
-	float4 vertexColor = ( swizzleColor( vertex.color ) * rpVertexColorModulate ) + rpVertexColorAdd;
-	result.color =  vertexColor * rpColor;
-}
-	}
-	hlsl_fp {
-/*
 ===========================================================================
 
 Doom 3 BFG Edition GPL Source Code
@@ -108,81 +27,128 @@ If you have questions concerning this license or the applicable additional terms
 ===========================================================================
 */
 
+/*
+ * Generated from platform/renderprogs/builtin/texture_color.vs.hlsl and platform/renderprogs/builtin/texture_color.ps.hlsl
+ * (RBDOOM-3-BFG GPL shader sources) for the renderprog decl system, whose
+ * engine code is adapted from the Wolfenstein: The New Order decl
+ * renderprog re-implementation on this engine's idlib.
+ */
 
+renderProg builtin/texture_color_soft {
+	hlsl_vp {
+		// *INDENT-OFF*
+		struct VS_IN {
+			float4 position : POSITION;
+			float2 texcoord : TEXCOORD0;
+			float4 normal : NORMAL;
+			float4 tangent : TANGENT;
+			float4 color : COLOR0;
+		};
 
-// *INDENT-OFF*
-uniform sampler2D samp0 : register(s0);
-#if defined( USE_SOFT_PARTICLE )
-uniform sampler2D samp1 : register(s1);
-#endif
+		struct VS_OUT {
+			float4 position : POSITION;
+			float2 texcoord0 : TEXCOORD0;
+			float4 color : COLOR0;
+		};
+		// *INDENT-ON*
 
-struct PS_IN {
-	float4 position : VPOS;
-	float2 texcoord0 : TEXCOORD0;
-	float4 color : COLOR0;
-};
+		void main( VS_IN vertex, out VS_OUT result )
+		{
+			result.position.x = dot4( vertex.position, rpMVPmatrixX );
+			result.position.y = dot4( vertex.position, rpMVPmatrixY );
+			result.position.z = dot4( vertex.position, rpMVPmatrixZ );
+			result.position.w = dot4( vertex.position, rpMVPmatrixW );
 
-struct PS_OUT {
-	float4 color : COLOR;
-};
-// *INDENT-ON*
+			// compute oldschool texgen or multiply by texture matrix
+			BRANCH if( rpTexGen0Enabled.x > 0.0 )
+			{
+				result.texcoord0.x = dot4( vertex.position, rpTexGen0S );
+				result.texcoord0.y = dot4( vertex.position, rpTexGen0T );
+			}
+			else
+			{
+				result.texcoord0.x = dot4( vertex.texcoord.xy, rpTextureMatrixS );
+				result.texcoord0.y = dot4( vertex.texcoord.xy, rpTextureMatrixT );
+			}
 
-#if defined( USE_SOFT_PARTICLE )
-// window depth to eye distance, the inverse of R_SetupProjectionMatrix: ndc.z = 0.999 - zNear / dist
-float SoftParticleEyeDistance( float windowZ )
-{
-	float denom = -rpProjectionMatrixZ.z - ( windowZ * 2.0 - 1.0 );
-	return ( denom > 0.00001 ) ? ( -rpProjectionMatrixZ.w / denom ) : 1.0e9;
-}
-
-// c is linear, fragPos is VPOS (window pixels + window depth)
-float4 SoftParticleFade( float4 c, float4 fragPos )
-{
-	float2 uv = ( fragPos.xy - rpSoftParticleViewport.xy ) * rpSoftParticleViewport.zw;
-	float sceneDist = SoftParticleEyeDistance( tex2D( samp1, uv ).r );
-	float fragDist = SoftParticleEyeDistance( fragPos.z );
-	float f = saturate( ( sceneDist - fragDist ) / rpSoftParticleParms.x );
-
-	if( rpSoftParticleParms.z > 0.0 )
-	{
-		f *= saturate( ( fragDist + rpProjectionMatrixZ.w ) / rpSoftParticleParms.z );
+			float4 vertexColor = ( swizzleColor( vertex.color ) * rpVertexColorModulate ) + rpVertexColorAdd;
+			result.color =  vertexColor * rpColor;
+		}
 	}
+	hlsl_fp {
+		// *INDENT-OFF*
+		uniform sampler2D samp0 : register(s0);
+		#if defined( USE_SOFT_PARTICLE )
+		uniform sampler2D samp1 : register(s1);
+		#endif
 
-	int mode = int( rpSoftParticleParms.y + 0.5 );
-	if( mode == 3 )
-	{
-		// DBM_COLORALPHA_ZERO
-		c *= f;
-	}
-	else if( mode == 4 )
-	{
-		// DBM_COLORALPHA_ONE
-		c = lerp( float4( 1.0, 1.0, 1.0, 1.0 ), c, f );
-	}
-	else if( mode == 5 )
-	{
-		// DBM_ALPHA_ONE
-		c.a = lerp( 1.0, c.a, f );
-	}
-	else if( mode == 6 )
-	{
-		// DBM_ALPHA_ZERO
-		c.a *= f;
-	}
+		struct PS_IN {
+			float4 position : VPOS;
+			float2 texcoord0 : TEXCOORD0;
+			float4 color : COLOR0;
+		};
 
-	return c;
-}
-#endif
+		struct PS_OUT {
+			float4 color : COLOR;
+		};
+		// *INDENT-ON*
 
-void main( PS_IN fragment, out PS_OUT result )
-{
-	float4 color = tex2D( samp0, fragment.texcoord0 ) * fragment.color;
-	clip( color.a - rpAlphaTest.x );
-	color = sRGBAToLinearRGBA( color );
-#if defined( USE_SOFT_PARTICLE )
-	color = SoftParticleFade( color, fragment.position );
-#endif
-	result.color = color;
-}
+		#if defined( USE_SOFT_PARTICLE )
+		// window depth to eye distance, the inverse of R_SetupProjectionMatrix: ndc.z = 0.999 - zNear / dist
+		float SoftParticleEyeDistance( float windowZ )
+		{
+			float denom = -rpProjectionMatrixZ.z - ( windowZ * 2.0 - 1.0 );
+			return ( denom > 0.00001 ) ? ( -rpProjectionMatrixZ.w / denom ) : 1.0e9;
+		}
+
+		// c is linear, fragPos is VPOS (window pixels + window depth)
+		float4 SoftParticleFade( float4 c, float4 fragPos )
+		{
+			float2 uv = ( fragPos.xy - rpSoftParticleViewport.xy ) * rpSoftParticleViewport.zw;
+			float sceneDist = SoftParticleEyeDistance( tex2D( samp1, uv ).r );
+			float fragDist = SoftParticleEyeDistance( fragPos.z );
+			float f = saturate( ( sceneDist - fragDist ) / rpSoftParticleParms.x );
+
+			if( rpSoftParticleParms.z > 0.0 )
+			{
+				f *= saturate( ( fragDist + rpProjectionMatrixZ.w ) / rpSoftParticleParms.z );
+			}
+
+			int mode = int( rpSoftParticleParms.y + 0.5 );
+			if( mode == 3 )
+			{
+				// DBM_COLORALPHA_ZERO
+				c *= f;
+			}
+			else if( mode == 4 )
+			{
+				// DBM_COLORALPHA_ONE
+				c = lerp( float4( 1.0, 1.0, 1.0, 1.0 ), c, f );
+			}
+			else if( mode == 5 )
+			{
+				// DBM_ALPHA_ONE
+				c.a = lerp( 1.0, c.a, f );
+			}
+			else if( mode == 6 )
+			{
+				// DBM_ALPHA_ZERO
+				c.a *= f;
+			}
+
+			return c;
+		}
+		#endif
+
+		void main( PS_IN fragment, out PS_OUT result )
+		{
+			float4 color = tex2D( samp0, fragment.texcoord0 ) * fragment.color;
+			clip( color.a - rpAlphaTest.x );
+			color = sRGBAToLinearRGBA( color );
+		#if defined( USE_SOFT_PARTICLE )
+			color = SoftParticleFade( color, fragment.position );
+		#endif
+			result.color = color;
+		}
 	}
 }
