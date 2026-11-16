@@ -51,14 +51,6 @@ not change.
 
 #if defined( USE_VULKAN )
 
-	extern idUniformBuffer emptyUBO;
-
-	void CreateVertexDescriptions();
-
-	void CreateDescriptorPools( VkDescriptorPool( &pools )[ NUM_FRAME_DATA ] );
-
-
-
 idRenderProgManager renderProgManager;
 
 /*
@@ -68,6 +60,16 @@ idRenderProgManager::idRenderProgManager()
 */
 idRenderProgManager::idRenderProgManager()
 {
+	currentRenderProgram = -1;
+	currentVertexShader = -1;
+	currentFragmentShader = -1;
+	currentDecl = nullptr;
+	currentUsesJoints = false;
+	currentOptionalSkinning = false;
+	counter = 0;
+	currentData = 0;
+	currentDescSet = 0;
+	currentParmBufferOffset = 0;
 }
 
 /*
@@ -81,10 +83,30 @@ idRenderProgManager::~idRenderProgManager()
 
 /*
 ================================================================================================
-R_ReloadShaders
+FindRenderProgDecl
+
+Resolves a shader name with its builtin suffix to the renderprog decl that
+implements it.
 ================================================================================================
 */
-static void R_ReloadShaders( const idCmdArgs& args )
+static idDeclRenderProg * FindRenderProgDecl( const char * name )
+{
+	idStr declName( name );
+	declName.StripFileExtension();
+	const idDeclRenderProg * decl = static_cast< const idDeclRenderProg * >(
+		declManager->FindType( DECL_RENDERPROG, declName.c_str(), false ) );
+	return const_cast< idDeclRenderProg * >( decl );
+}
+
+/*
+================================================================================================
+R_ReloadShaders
+
+Drops the compiled GL programs; decl text is reloaded through the decl
+manager (reloadDecls) and the programs compile again on the next bind.
+================================================================================================
+*/
+static void R_ReloadShaders( const idCmdArgs &args )
 {
 	renderProgManager.KillAllShaders();
 	renderProgManager.LoadAllShaders();
@@ -93,12 +115,18 @@ static void R_ReloadShaders( const idCmdArgs& args )
 /*
 ================================================================================================
 idRenderProgManager::Init()
+
+Every builtin shader resolves to the renderprog decl named after the legacy
+builtin table entry; the Vulkan programs (SPIR-V modules, layouts,
+pipelines) are built lazily on first bind, so a decl that fails to compile
+reports at the first draw that uses it instead of at startup. The decl
+manager registers the renderprogs folder during its own Init(), before the
+renderer initializes, so the lookups below find every decl.
 ================================================================================================
 */
 void idRenderProgManager::Init()
 {
 	common->Printf( "----- Initializing Render Shaders -----\n" );
-
 
 	for( int i = 0; i < MAX_BUILTINS; i++ )
 	{
@@ -238,92 +266,49 @@ void idRenderProgManager::Init()
 	};
 	int numBuiltins = sizeof( builtins ) / sizeof( builtins[0] );
 
-	renderProgs.SetNum( numBuiltins );
-
 	for( int i = 0; i < numBuiltins; i++ )
 	{
-		renderProg_t& prog = renderProgs[ i ];
-
-		prog.name = builtins[i].name;
-		prog.builtin = true;
-		prog.vertexLayout = builtins[i].layout;
-
-		builtinShaders[builtins[i].index] = i;
-
 		if( builtins[i].requireGPUSkinningSupport && !glConfig.gpuSkinningAvailable )
 		{
 			// RB: don't try to load shaders that would break the GLSL compiler in the OpenGL driver
 			continue;
 		}
 
-		uint32 shaderFeatures = builtins[i].shaderFeatures;
-		if( builtins[i].requireGPUSkinningSupport )
+		// the decls carry the full builtin name plus the table suffix,
+		// e.g. builtin/lighting/interactionSM + _spot
+		idStr declName( builtins[i].name );
+		declName.StripFileExtension();
+		declName += builtins[i].nameOutSuffix;
+
+		idDeclRenderProg * decl = FindRenderProgDecl( declName.c_str() );
+		if( decl == nullptr )
 		{
-			shaderFeatures |= BIT( USE_GPU_SKINNING );
+			common->Warning( "no renderprog decl for builtin shader %s", declName.c_str() );
 		}
 
-		int vIndex = -1;
-		if( builtins[ i ].stages & SHADER_STAGE_VERTEX )
-		{
-			vIndex = FindShader( builtins[ i ].name, SHADER_STAGE_VERTEX, builtins[i].nameOutSuffix, shaderFeatures, true, builtins[i].layout );
-		}
+		shaderEntry_t shader;
+		shader.name = declName;
+		shader.decl = decl;
+		const int vertexShaderIndex = vertexShaders.Append( shader );
+		const int fragmentShaderIndex = fragmentShaders.Append( shader );
 
-		int fIndex = -1;
-		if( builtins[ i ].stages & SHADER_STAGE_FRAGMENT )
-		{
-			fIndex = FindShader( builtins[ i ].name, SHADER_STAGE_FRAGMENT, builtins[i].nameOutSuffix, shaderFeatures, true, builtins[i].layout );
-		}
-
-		//idLib::Printf( "Loading GLSL program %i %i %i\n", i, vIndex, fIndex );
-
-		LoadGLSLProgram( i, vIndex, fIndex );
+		programEntry_t program;
+		program.name = declName;
+		program.decl = decl;
+		program.vertexShaderIndex = vertexShaderIndex;
+		program.fragmentShaderIndex = fragmentShaderIndex;
+		builtinShaders[builtins[i].index] = glslPrograms.Append( program );
 	}
+
+	glslUniforms.SetNum( RENDERPARM_TOTAL, vec4_zero );
 
 	r_useHalfLambertLighting.ClearModified();
 	r_useHDR.ClearModified();
 	r_usePBR.ClearModified();
 	r_pbrDebug.ClearModified();
 
-	uniforms.SetNum( RENDERPARM_TOTAL, vec4_zero );
-
-	if( glConfig.gpuSkinningAvailable )
-	{
-		renderProgs[builtinShaders[BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_TEXTURE_VERTEXCOLOR_SKINNED_SOFT]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_INTERACTION_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_INTERACTION_AMBIENT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_ENVIRONMENT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_BUMPY_ENVIRONMENT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_DEPTH_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_FOG_SKINNED]].usesJoints = true;
-		// RB begin
-		renderProgs[builtinShaders[BUILTIN_DEBUG_LIGHTGRID_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_DEBUG_OCTAHEDRON_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_AMBIENT_LIGHTING_SKINNED]].usesJoints = true;
-
-		renderProgs[builtinShaders[BUILTIN_AMBIENT_LIGHTING_IBL_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_AMBIENT_LIGHTING_IBL_PBR_SKINNED]].usesJoints = true;
-
-		renderProgs[builtinShaders[BUILTIN_AMBIENT_LIGHTGRID_IBL_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_AMBIENT_LIGHTGRID_IBL_PBR_SKINNED]].usesJoints = true;
-
-		renderProgs[builtinShaders[BUILTIN_SMALL_GEOMETRY_BUFFER_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_INTERACTION_SHADOW_MAPPING_POINT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED]].usesJoints = true;
-
-		// PBR variants
-		renderProgs[builtinShaders[BUILTIN_PBR_INTERACTION_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_PBR_INTERACTION_AMBIENT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_SPOT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_POINT_SKINNED]].usesJoints = true;
-		renderProgs[builtinShaders[BUILTIN_PBR_INTERACTION_SHADOW_MAPPING_PARALLEL_SKINNED]].usesJoints = true;
-		// RB end
-	}
-
 	cmdSystem->AddCommand( "reloadShaders", R_ReloadShaders, CMD_FL_RENDERER, "reloads shaders" );
 
-#if defined(USE_VULKAN)
 	counter = 0;
 
 	// Create Vertex Descriptions
@@ -340,91 +325,128 @@ void idRenderProgManager::Init()
 
 	// Placeholder: mainly for optionalSkinning
 	emptyUBO.AllocBufferObject( NULL, sizeof( idVec4 ), BU_DYNAMIC );
-#endif
 }
 
 /*
 ================================================================================================
 idRenderProgManager::LoadAllShaders()
+
+The Vulkan programs upload lazily on the next bind; dropping the uploaded
+state here makes every program rebuild its modules and layouts from the
+current decl data.
 ================================================================================================
 */
 void idRenderProgManager::LoadAllShaders()
 {
-	for( int i = 0; i < shaders.Num(); i++ )
+	for( int i = 0; i < glslPrograms.Num(); ++i )
 	{
-		LoadShader( i, shaders[i].stage );
-	}
-
-	for( int i = 0; i < renderProgs.Num(); ++i )
-	{
-		if( renderProgs[i].vertexShaderIndex == -1 || renderProgs[i].fragmentShaderIndex == -1 )
-		{
-			// RB: skip reloading because we didn't load it initially
-			continue;
-		}
-
-		LoadGLSLProgram( i, renderProgs[i].vertexShaderIndex, renderProgs[i].fragmentShaderIndex );
+		FreeDeclProgram( glslPrograms[i] );
 	}
 }
 
-
+/*
+================================================================================================
+idRenderProgManager::KillAllShaders()
+================================================================================================
+*/
+void idRenderProgManager::KillAllShaders()
+{
+	Unbind();
+	for( int i = 0; i < glslPrograms.Num(); ++i )
+	{
+		FreeDeclProgram( glslPrograms[i] );
+	}
+}
 
 /*
 ================================================================================================
 idRenderProgManager::Shutdown()
+
+Releases the uploaded programs and the per frame descriptor machinery; the
+builtin decl table survives so a later Init() finds everything again.
 ================================================================================================
 */
 void idRenderProgManager::Shutdown()
 {
 	KillAllShaders();
+
+	for( int i = 0; i < NUM_FRAME_DATA; ++i )
+	{
+		if( parmBuffers[ i ] != NULL )
+		{
+			parmBuffers[ i ]->FreeBufferObject();
+			delete parmBuffers[ i ];
+			parmBuffers[ i ] = NULL;
+		}
+	}
+
+	emptyUBO.FreeBufferObject();
+
+	for( int i = 0; i < NUM_FRAME_DATA; ++i )
+	{
+		if( descriptorPools[ i ] != VK_NULL_HANDLE )
+		{
+			vkDestroyDescriptorPool( vkcontext.device, descriptorPools[ i ], NULL );
+		}
+	}
+
+	memset( descriptorSets, 0, sizeof( descriptorSets ) );
+	memset( descriptorPools, 0, sizeof( descriptorPools ) );
+
+	counter = 0;
+	currentData = 0;
+	currentDescSet = 0;
 }
 
 /*
 ================================================================================================
-idRenderProgManager::FindVertexShader
+idRenderProgManager::FindShader()
+
+Resolves a shader name plus its builtin suffix to the renderprog decl of the
+same name; the returned index only identifies the shader entry, the GL
+program lives in the decl.
 ================================================================================================
 */
 int idRenderProgManager::FindShader( const char* name, rpStage_t stage, const char* nameOutSuffix, uint32 features, bool builtin, vertexLayoutType_t vertexLayout )
 {
 	idStr shaderName( name );
 	shaderName.StripFileExtension();
-	//shaderName += nameOutSuffix;
+	idStr declName( shaderName );
+	declName += nameOutSuffix;
 
-	for( int i = 0; i < shaders.Num(); i++ )
+	idList<shaderEntry_t>& shaderList = ( stage == SHADER_STAGE_VERTEX ) ? vertexShaders : fragmentShaders;
+	for( int i = 0; i < shaderList.Num(); i++ )
 	{
-		shader_t& shader = shaders[ i ];
-		if( shader.name.Icmp( shaderName.c_str() ) == 0 && shader.stage == stage && shader.nameOutSuffix.Icmp( nameOutSuffix ) == 0 )
+		if( shaderList[i].name.Icmp( declName.c_str() ) == 0 )
 		{
-			LoadShader( i, stage );
 			return i;
 		}
 	}
 
-	shader_t shader;
-	shader.name = shaderName;
-	shader.nameOutSuffix = nameOutSuffix;
-	shader.shaderFeatures = features;
-	shader.builtin = builtin;
-	shader.stage = stage;
-	shader.vertexLayout = vertexLayout;
-
-	int index = shaders.Append( shader );
-	LoadShader( index, stage );
-
-	return index;
+	shaderEntry_t shader;
+	shader.name = declName;
+	shader.decl = FindRenderProgDecl( declName.c_str() );
+	if( shader.decl == nullptr )
+	{
+		common->Warning( "no renderprog decl for %s shader %s",
+						 ( stage == SHADER_STAGE_VERTEX ) ? "vertex" : "fragment", declName.c_str() );
+	}
+	return shaderList.Append( shader );
 }
-
-
-// RB begin
-bool idRenderProgManager::IsShaderBound() const
-{
-	return ( current != -1 );
-}
-// RB end
 
 /*
 ================================================================================================
-idRenderProgManager::SetRenderParms
+idRenderProgManager::IsShaderBound()
+================================================================================================
+*/
+bool idRenderProgManager::IsShaderBound() const
+{
+	return ( currentDecl != nullptr );
+}
+
+/*
+================================================================================================
+idRenderProgManager::SetRenderParms()
 ================================================================================================
 */
 void idRenderProgManager::SetRenderParms( renderParm_t rp, const float values[], int num )
@@ -437,14 +459,172 @@ void idRenderProgManager::SetRenderParms( renderParm_t rp, const float values[],
 
 /*
 ================================================================================================
-idRenderProgManager::SetRenderParm
+idRenderProgManager::SetRenderParms()
 ================================================================================================
 */
-void idRenderProgManager::SetRenderParm( renderParm_t rp, const float value[4] )
+void idRenderProgManager::SetRenderParms( renderParm_t rp, const float values[], int num )
 {
-	SetUniformValue( rp, value );
+	for( int i = 0; i < num; i++ )
+	{
+		SetRenderParm( ( renderParm_t )( rp + i ), values + ( i * 4 ) );
+	}
 }
 
+/*
+================================================================================================
+idRenderProgManager::BindDecl()
+
+Checks the decl state, uploads the Vulkan program of the current program
+entry if needed, and refreshes the cached joint and skinning state.
+================================================================================================
+*/
+void idRenderProgManager::BindDecl( idDeclRenderProg * decl )
+{
+	currentDecl = decl;
+	currentUsesJoints = false;
+	currentOptionalSkinning = false;
+	if( decl == nullptr )
+	{
+		return;
+	}
+	// a purged decl has its data stripped; reparse the real source so the
+	// cached decl pointer heals after a level load
+	if( decl->GetState() == DS_UNPARSED )
+	{
+		decl->EnsureNotPurged();
+	}
+	// a decl that failed to parse holds the green default program; try the
+	// real source once and never draw the green stub
+	if( decl->GetState() == DS_DEFAULTED )
+	{
+		decl->RecoverFromDefaulted();
+	}
+	if( decl->GetState() == DS_DEFAULTED )
+	{
+		currentDecl = nullptr;
+		return;
+	}
+	if( currentRenderProgram < 0 || currentRenderProgram >= glslPrograms.Num() )
+	{
+		currentDecl = nullptr;
+		return;
+	}
+	programEntry_t & program = glslPrograms[ currentRenderProgram ];
+	UploadDeclProgram( program );
+	if( program.vertexModule == VK_NULL_HANDLE )
+	{
+		// the decl has no usable Vulkan program; keep no program bound so
+		// the draw is skipped instead of drawing with the wrong program
+		common->Warning( "renderprog %s has no Vulkan program", decl->GetName() );
+		currentDecl = nullptr;
+		return;
+	}
+	RENDERLOG_PRINTF( "Binding SPIR-V Program %s\n", decl->GetName() );
+	currentUsesJoints = program.usesJoints;
+	currentOptionalSkinning = program.optionalSkinning;
+}
+
+/*
+================================================================================================
+idRenderProgManager::Unbind()
+================================================================================================
+*/
+void idRenderProgManager::Unbind()
+{
+	currentRenderProgram = -1;
+	currentVertexShader = -1;
+	currentFragmentShader = -1;
+	currentDecl = nullptr;
+	currentUsesJoints = false;
+	currentOptionalSkinning = false;
+}
+
+/*
+================================================================================================
+idRenderProgManager::BindProgram()
+================================================================================================
+*/
+void idRenderProgManager::BindProgram( int progIndex )
+{
+	if( progIndex < 0 || progIndex >= glslPrograms.Num() )
+	{
+		return;
+	}
+	if( currentRenderProgram == progIndex && currentDecl != nullptr )
+	{
+		return;
+	}
+	currentRenderProgram = progIndex;
+	const programEntry_t & program = glslPrograms[progIndex];
+	currentVertexShader = program.vertexShaderIndex;
+	currentFragmentShader = program.fragmentShaderIndex;
+	BindDecl( program.decl );
+}
+
+/*
+================================================================================================
+idRenderProgManager::FindGLSLProgram()
+================================================================================================
+*/
+int idRenderProgManager::FindGLSLProgram( const char* name, int vIndex, int fIndex )
+{
+	for( int i = 0; i < glslPrograms.Num(); ++i )
+	{
+		if( glslPrograms[i].vertexShaderIndex == vIndex && glslPrograms[i].fragmentShaderIndex == fIndex )
+		{
+			return i;
+		}
+	}
+	programEntry_t program;
+	program.name = name;
+	program.decl = nullptr;
+	if( vIndex >= 0 && vIndex < vertexShaders.Num() )
+	{
+		program.decl = vertexShaders[vIndex].decl;
+	}
+	if( program.decl == nullptr && fIndex >= 0 && fIndex < fragmentShaders.Num() )
+	{
+		program.decl = fragmentShaders[fIndex].decl;
+	}
+	program.vertexShaderIndex = vIndex;
+	program.fragmentShaderIndex = fIndex;
+	return glslPrograms.Append( program );
+}
+
+/*
+================================================================================================
+idRenderProgManager::GetGLSLParmName()
+================================================================================================
+*/
+const char* idRenderProgManager::GetGLSLParmName( int rp ) const
+{
+	assert( rp >= 0 && rp < RENDERPARM_TOTAL );
+	const char * parmName = renderProgParms.GetParmNameForIndex( rp );
+	return ( parmName != nullptr ) ? parmName : "<badParmIndex>";
+}
+
+/*
+================================================================================================
+idRenderProgManager::SetUniformValue()
+================================================================================================
+*/
+void idRenderProgManager::SetUniformValue( const renderParm_t rp, const float value[4] )
+{
+	for( int i = 0; i < 4; i++ )
+	{
+		glslUniforms[rp][i] = value[i];
+	}
+}
+
+/*
+================================================================================================
+idRenderProgManager::ZeroUniforms()
+================================================================================================
+*/
+void idRenderProgManager::ZeroUniforms()
+{
+	memset( glslUniforms.Ptr(), 0, glslUniforms.Allocated() );
+}
 
 /*
 ========================
@@ -735,6 +915,7 @@ void RpPrintState( uint64 stateBits )
 		printStencil( STENCIL_FACE_NUM, stateBits, mask, ref );
 	}
 }
+
 #else
 /*
 The OpenGL renderer resolves every shader through renderprog decls under
