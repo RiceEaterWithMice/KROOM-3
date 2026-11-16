@@ -48,12 +48,6 @@ idUniformBuffer emptyUBO;
 
 static vertexLayout_t vertexLayouts[ NUM_VERTEX_LAYOUTS ];
 
-static const char* renderProgBindingStrings[ BINDING_TYPE_MAX ] =
-{
-	"ubo",
-	"sampler"
-};
-
 /*
 =============
 CreateVertexDescriptions
@@ -172,59 +166,6 @@ static VkDescriptorType GetDescriptorType( rpBinding_t type )
 	}
 }
 
-/*
-========================
-CreateDescriptorSetLayout
-========================
-*/
-void idRenderProgManager::CreateDescriptorSetLayout( const shader_t& vertexShader, const shader_t& fragmentShader, renderProg_t& renderProg )
-{
-	// Descriptor Set Layout
-	{
-		idList< VkDescriptorSetLayoutBinding > layoutBindings;
-		VkDescriptorSetLayoutBinding binding = {};
-		binding.descriptorCount = 1;
-
-		uint32 bindingId = 0;
-
-		binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-		for( int i = 0; i < vertexShader.bindings.Num(); ++i )
-		{
-			binding.binding = bindingId++;
-			binding.descriptorType = GetDescriptorType( vertexShader.bindings[ i ] );
-			renderProg.bindings.Append( vertexShader.bindings[ i ] );
-
-			layoutBindings.Append( binding );
-		}
-
-		binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-		for( int i = 0; i < fragmentShader.bindings.Num(); ++i )
-		{
-			binding.binding = bindingId++;
-			binding.descriptorType = GetDescriptorType( fragmentShader.bindings[ i ] );
-			renderProg.bindings.Append( fragmentShader.bindings[ i ] );
-
-			layoutBindings.Append( binding );
-		}
-
-		VkDescriptorSetLayoutCreateInfo createInfo = {};
-		createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		createInfo.bindingCount = layoutBindings.Num();
-		createInfo.pBindings = layoutBindings.Ptr();
-
-		vkCreateDescriptorSetLayout( vkcontext.device, &createInfo, NULL, &renderProg.descriptorSetLayout );
-	}
-
-	// Pipeline Layout
-	{
-		VkPipelineLayoutCreateInfo createInfo = {};
-		createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		createInfo.setLayoutCount = 1;
-		createInfo.pSetLayouts = &renderProg.descriptorSetLayout;
-
-		vkCreatePipelineLayout( vkcontext.device, &createInfo, NULL, &renderProg.pipelineLayout );
-	}
-}
 
 /*
 ========================
@@ -243,56 +184,13 @@ void idRenderProgManager::StartFrame()
 
 /*
 ================================================================================================
-idRenderProgManager::BindProgram
-================================================================================================
-*/
-void idRenderProgManager::BindProgram( int index )
-{
-	if( current == index )
-	{
-		return;
-	}
-
-	current = index;
-
-	RENDERLOG_PRINTF( "Binding SPIR-V Program %s\n", renderProgs[ index ].name.c_str() );
-}
-
-/*
-================================================================================================
-idRenderProgManager::Unbind
-================================================================================================
-*/
-void idRenderProgManager::Unbind()
-{
-	current = -1;
-}
-
-/*
-================================================================================================
-idRenderProgManager::LoadShader
-================================================================================================
-*/
-void idRenderProgManager::LoadShader( int index, rpStage_t stage )
-{
-	if( shaders[ index ].module != VK_NULL_HANDLE )
-	{
-		return; // Already loaded
-	}
-
-	LoadShader( shaders[index] );
-}
-
-
-/*
-================================================================================================
 CompileGLSLtoSPIRV
 ================================================================================================
 */
 
 #include <shaderc/shaderc.hpp>
 
-static int CompileGLSLtoSPIRV( const char* filename, const idStr& dataGLSL, const rpStage_t stage, uint32** spirvBuffer )
+int CompileGLSLtoSPIRV( const char* filename, const idStr& dataGLSL, const rpStage_t stage, uint32** spirvBuffer )
 {
 	shaderc::Compiler compiler;
 	shaderc::CompileOptions options;
@@ -346,328 +244,42 @@ static int CompileGLSLtoSPIRV( const char* filename, const idStr& dataGLSL, cons
 
 /*
 ================================================================================================
-idRenderProgManager::LoadGLSLShader
-================================================================================================
-*/
-void idRenderProgManager::LoadShader( shader_t& shader )
-{
-	idStr inFile;
-	idStr outFileHLSL;
-	idStr outFileGLSL;
-	idStr outFileSPIRV;
-	idStr outFileLayout;
-
-	// RB: replaced backslashes
-	inFile.Format( "renderprogs/%s", shader.name.c_str() );
-	inFile.StripFileExtension();
-	outFileHLSL.Format( "renderprogs/hlsl/%s%s", shader.name.c_str(), shader.nameOutSuffix.c_str() );
-	outFileHLSL.StripFileExtension();
-
-	outFileGLSL.Format( "renderprogs/vkglsl/%s%s", shader.name.c_str(), shader.nameOutSuffix.c_str() );
-	outFileLayout.Format( "renderprogs/vkglsl/%s%s", shader.name.c_str(), shader.nameOutSuffix.c_str() );
-
-	outFileGLSL.StripFileExtension();
-	outFileLayout.StripFileExtension();
-
-	if( shader.stage == SHADER_STAGE_FRAGMENT )
-	{
-		inFile += ".ps.hlsl";
-		outFileHLSL += ".ps.hlsl";
-		outFileGLSL += ".frag";
-		outFileLayout += ".frag.layout";
-		outFileSPIRV += ".fspv";
-	}
-	else
-	{
-		inFile += ".vs.hlsl";
-		outFileHLSL += ".vs.hlsl";
-		outFileGLSL += ".vert";
-		outFileLayout += ".vert.layout";
-		outFileSPIRV += ".vspv";
-	}
-
-	// first check whether we already have a valid GLSL file and compare it to the hlsl timestamp;
-	ID_TIME_T hlslTimeStamp;
-	int hlslFileLength = fileSystem->ReadFile( inFile.c_str(), NULL, &hlslTimeStamp );
-
-	ID_TIME_T glslTimeStamp;
-	int glslFileLength = fileSystem->ReadFile( outFileGLSL.c_str(), NULL, &glslTimeStamp );
-
-	// if the glsl file doesn't exist or we have a newer HLSL file we need to recreate the glsl file.
-	idStr programGLSL;
-	idStr programLayout;
-	//if( ( glslFileLength <= 0 ) || ( hlslTimeStamp != FILE_NOT_FOUND_TIMESTAMP && hlslTimeStamp > glslTimeStamp ) || r_alwaysExportGLSL.GetBool() )
-	{
-		const char* hlslFileBuffer = NULL;
-		int len = 0;
-
-		if( hlslFileLength <= 0 )
-		{
-			hlslFileBuffer = FindEmbeddedSourceShader( inFile.c_str() );
-			if( hlslFileBuffer == NULL )
-			{
-				// hlsl file doesn't even exist bail out
-				idLib::Error( "HLSL file %s could not be loaded and may be corrupt", inFile.c_str() );
-				return;
-			}
-
-			len = strlen( hlslFileBuffer );
-		}
-		else
-		{
-			len = fileSystem->ReadFile( inFile.c_str(), ( void** ) &hlslFileBuffer );
-		}
-
-		if( len <= 0 )
-		{
-			return;
-		}
-
-		idStrList compileMacros;
-		for( int j = 0; j < MAX_SHADER_MACRO_NAMES; j++ )
-		{
-			if( BIT( j ) & shader.shaderFeatures )
-			{
-				const char* macroName = GetGLSLMacroName( ( shaderFeature_t ) j );
-				compileMacros.Append( idStr( macroName ) );
-			}
-		}
-
-		// FIXME: we should really scan the program source code for using rpEnableSkinning but at this
-		// point we directly load a binary and the program source code is not available on the consoles
-		bool hasGPUSkinning = false;
-
-		if(	idStr::Icmp( shader.name.c_str(), "heatHaze" ) == 0 ||
-				idStr::Icmp( shader.name.c_str(), "heatHazeWithMask" ) == 0 ||
-				idStr::Icmp( shader.name.c_str(), "heatHazeWithMaskAndVertex" ) == 0 ||
-				( BIT( USE_GPU_SKINNING ) & shader.shaderFeatures ) )
-		{
-			hasGPUSkinning = true;
-		}
-
-		idStr hlslCode( hlslFileBuffer );
-		idStr programHLSL = StripDeadCode( hlslCode, inFile, compileMacros, shader.builtin );
-		programGLSL = ConvertCG2GLSL( programHLSL, inFile, shader.stage, programLayout, true, hasGPUSkinning, shader.vertexLayout );
-
-		fileSystem->WriteFile( outFileHLSL, programHLSL.c_str(), programHLSL.Length(), "fs_savepath" );
-		fileSystem->WriteFile( outFileGLSL, programGLSL.c_str(), programGLSL.Length(), "fs_savepath" );
-		fileSystem->WriteFile( outFileLayout, programLayout.c_str(), programLayout.Length(), "fs_savepath" );
-	}
-	/*
-	else
-	{
-		// read in the glsl file
-		void* fileBufferGLSL = NULL;
-		int lengthGLSL = fileSystem->ReadFile( outFileGLSL.c_str(), &fileBufferGLSL );
-		if( lengthGLSL <= 0 )
-		{
-			idLib::Error( "GLSL file %s could not be loaded and may be corrupt", outFileGLSL.c_str() );
-		}
-		programGLSL = ( const char* ) fileBufferGLSL;
-		Mem_Free( fileBufferGLSL );
-
-
-		{
-			// read in the uniform file
-			void* fileBufferUniforms = NULL;
-			int lengthUniforms = fileSystem->ReadFile( outFileUniforms.c_str(), &fileBufferUniforms );
-			if( lengthUniforms <= 0 )
-			{
-				idLib::Error( "uniform file %s could not be loaded and may be corrupt", outFileUniforms.c_str() );
-			}
-			programUniforms = ( const char* ) fileBufferUniforms;
-			Mem_Free( fileBufferUniforms );
-		}
-	}
-	*/
-
-	// RB: find the uniforms locations in either the vertex or fragment uniform array
-	// this uses the new layout structure
-	{
-		idLexer src( programLayout, programLayout.Length(), "layout" );
-		idToken token;
-		if( src.ExpectTokenString( "uniforms" ) )
-		{
-			src.ExpectTokenString( "[" );
-
-			while( !src.CheckTokenString( "]" ) )
-			{
-				src.ReadToken( &token );
-
-				int index = -1;
-				for( int i = 0; i < RENDERPARM_TOTAL && index == -1; i++ )
-				{
-					const char* parmName = GetGLSLParmName( i );
-					if( token == parmName )
-					{
-						index = i;
-					}
-				}
-
-				if( index == -1 )
-				{
-					idLib::Error( "couldn't find uniform %s for %s", token.c_str(), outFileGLSL.c_str() );
-				}
-				shader.parmIndices.Append( index );
-			}
-		}
-
-		if( src.ExpectTokenString( "bindings" ) )
-		{
-			src.ExpectTokenString( "[" );
-
-			while( !src.CheckTokenString( "]" ) )
-			{
-				src.ReadToken( &token );
-
-				int index = -1;
-				for( int i = 0; i < BINDING_TYPE_MAX; ++i )
-				{
-					if( token == renderProgBindingStrings[ i ] )
-					{
-						index = i;
-					}
-				}
-
-				if( index == -1 )
-				{
-					idLib::Error( "Invalid binding %s", token.c_str() );
-				}
-
-				shader.bindings.Append( static_cast< rpBinding_t >( index ) );
-			}
-		}
-	}
-
-	// TODO GLSL to SPIR-V compilation
-	uint32* spirvBuffer = NULL;
-	int spirvLen = CompileGLSLtoSPIRV( outFileGLSL.c_str(), programGLSL, shader.stage, &spirvBuffer );
-
-	VkShaderModuleCreateInfo shaderModuleCreateInfo = {};
-	shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	shaderModuleCreateInfo.codeSize = spirvLen;
-	shaderModuleCreateInfo.pCode = ( uint32* )spirvBuffer;
-
-	ID_VK_CHECK( vkCreateShaderModule( vkcontext.device, &shaderModuleCreateInfo, NULL, &shader.module ) );
-
-	Mem_Free( spirvBuffer );
-}
-
-/*
-================================================================================================
-idRenderProgManager::LoadGLSLProgram
-================================================================================================
-*/
-void idRenderProgManager::LoadGLSLProgram( const int programIndex, const int vertexShaderIndex, const int fragmentShaderIndex )
-{
-	renderProg_t& prog = renderProgs[programIndex];
-
-	if( prog.progId != INVALID_PROGID )
-	{
-		return; // Already loaded
-	}
-
-	idStr programName = shaders[ vertexShaderIndex ].name;
-	programName.StripFileExtension();
-	prog.name = programName;
-	//prog.progId = programIndex;
-	prog.fragmentShaderIndex = fragmentShaderIndex;
-	prog.vertexShaderIndex = vertexShaderIndex;
-
-	CreateDescriptorSetLayout( shaders[ vertexShaderIndex ], shaders[ fragmentShaderIndex ], prog );
-
-
-	// TODO
-
-#if 1
-	// RB: removed idStr::Icmp( name, "heatHaze.vfp" ) == 0  hack
-	for( int i = 0; i < shaders[vertexShaderIndex].parmIndices.Num(); i++ )
-	{
-		if( shaders[vertexShaderIndex].parmIndices[i] == RENDERPARM_ENABLE_SKINNING )
-		{
-			prog.usesJoints = true;
-			prog.optionalSkinning = true;
-		}
-	}
-#endif
-}
-
-/*
-================================================================================================
-idRenderProgManager::KillAllShaders()
-================================================================================================
-*/
-void idRenderProgManager::KillAllShaders()
-{
-	Unbind();
-
-	// destroy shaders
-	for( int i = 0; i < shaders.Num(); ++i )
-	{
-		shader_t& shader = shaders[ i ];
-		vkDestroyShaderModule( vkcontext.device, shader.module, NULL );
-		shader.module = VK_NULL_HANDLE;
-	}
-
-	// destroy pipelines
-	for( int i = 0; i < renderProgs.Num(); ++i )
-	{
-		renderProg_t& prog = renderProgs[ i ];
-
-		for( int j = 0; j < prog.pipelines.Num(); ++j )
-		{
-			vkDestroyPipeline( vkcontext.device, prog.pipelines[ j ].pipeline, NULL );
-		}
-		prog.pipelines.Clear();
-
-		vkDestroyDescriptorSetLayout( vkcontext.device, prog.descriptorSetLayout, NULL );
-		vkDestroyPipelineLayout( vkcontext.device, prog.pipelineLayout, NULL );
-	}
-	renderProgs.Clear();
-
-	for( int i = 0; i < NUM_FRAME_DATA; ++i )
-	{
-		parmBuffers[ i ]->FreeBufferObject();
-		delete parmBuffers[ i ];
-		parmBuffers[ i ] = NULL;
-	}
-
-	emptyUBO.FreeBufferObject();
-
-	for( int i = 0; i < NUM_FRAME_DATA; ++i )
-	{
-		//vkFreeDescriptorSets( vkcontext.device, descriptorPools[ i ], MAX_DESC_SETS, descriptorSets[ i ] );
-		vkResetDescriptorPool( vkcontext.device, descriptorPools[ i ], 0 );
-		vkDestroyDescriptorPool( vkcontext.device, descriptorPools[ i ], NULL );
-	}
-
-	memset( descriptorSets, 0, sizeof( descriptorSets ) );
-	memset( descriptorPools, 0, sizeof( descriptorPools ) );
-
-	counter = 0;
-	currentData = 0;
-	currentDescSet = 0;
-}
-
-/*
-========================
 idRenderProgManager::AllocParmBlockBuffer
-========================
+
+Suballocates the uniform block values of one stage from the frame parm
+buffer in the order of the parm list; the shadow matrix parm covers the 24
+consecutive rows of rpShadowMatrices, which the legacy parm block buffer
+never supported.
+================================================================================================
 */
 void idRenderProgManager::AllocParmBlockBuffer( const idList<int>& parmIndices, idUniformBuffer& ubo )
 {
-	// TODO support shadow matrices + 23 float4
+	int numVec4s = 0;
+	for( int i = 0; i < parmIndices.Num(); ++i )
+	{
+		numVec4s += ( parmIndices[i] == RENDERPARM_SHADOW_MATRIX_0_X ) ? 6 * 4 : 1;
+	}
 
-	const int numParms = parmIndices.Num();
-	const int bytes = ALIGN( numParms * sizeof( idVec4 ), vkcontext.gpu->props.limits.minUniformBufferOffsetAlignment );
+	const int bytes = ALIGN( numVec4s * sizeof( idVec4 ), vkcontext.gpu->props.limits.minUniformBufferOffsetAlignment );
 
 	ubo.Reference( *parmBuffers[ currentData ], currentParmBufferOffset, bytes );
 
 	idVec4* gpuUniforms = ( idVec4* )ubo.MapBuffer( BM_WRITE );
 
-	for( int i = 0; i < numParms; ++i )
+	int slot = 0;
+	for( int i = 0; i < parmIndices.Num(); ++i )
 	{
-		gpuUniforms[ i ] = uniforms[ static_cast< renderParm_t >( parmIndices[ i ] ) ];
+		if( parmIndices[i] == RENDERPARM_SHADOW_MATRIX_0_X )
+		{
+			for( int j = 0; j < 6 * 4; j++ )
+			{
+				gpuUniforms[ slot++ ] = glslUniforms[ RENDERPARM_SHADOW_MATRIX_0_X + j ];
+			}
+		}
+		else
+		{
+			gpuUniforms[ slot++ ] = glslUniforms[ parmIndices[i] ];
+		}
 	}
 
 	ubo.UnmapBuffer();
@@ -1103,87 +715,56 @@ static VkPipeline CreateGraphicsPipeline(
 
 /*
 ========================
-renderProg_t::GetPipeline
+idRenderProgManager::GetPipeline
+
+Returns the cached pipeline for the state bits, creating it from the
+program's modules and layout on first use.
 ========================
 */
-VkPipeline idRenderProgManager::renderProg_t::GetPipeline( uint64 stateBits, VkShaderModule vertexShader, VkShaderModule fragmentShader )
+VkPipeline idRenderProgManager::GetPipeline( programEntry_t & program, uint64 stateBits )
 {
-	for( int i = 0; i < pipelines.Num(); ++i )
+	for( int i = 0; i < program.pipelines.Num(); ++i )
 	{
-		if( stateBits == pipelines[ i ].stateBits )
+		if( stateBits == program.pipelines[ i ].stateBits )
 		{
-			return pipelines[ i ].pipeline;
+			return program.pipelines[ i ].pipeline;
 		}
 	}
 
-	VkPipeline pipeline = CreateGraphicsPipeline( vertexLayout, vertexShader, fragmentShader, pipelineLayout, stateBits );
+	VkPipeline pipeline = CreateGraphicsPipeline( program.vertexLayout, program.vertexModule, program.fragmentModule, program.pipelineLayout, stateBits );
 
-	pipelineState_t pipelineState;
+	programEntry_t::pipelineState_t pipelineState;
 	pipelineState.pipeline = pipeline;
 	pipelineState.stateBits = stateBits;
-	pipelines.Append( pipelineState );
+	program.pipelines.Append( pipelineState );
 
 	return pipeline;
 }
 
 /*
 ================================================================================================
-idRenderProgManager::CommitUnforms
+idRenderProgManager::CommitUniforms
+
+Allocates a descriptor set for the current decl program, fills the per stage
+uniform blocks from the current uniform values, binds the images in sampler
+binding order, and binds the pipeline for the state bits. Every draw gets a
+fresh descriptor set from the frame pool; the pools reset in StartFrame.
 ================================================================================================
 */
 void idRenderProgManager::CommitUniforms( uint64 stateBits )
 {
-#if 0
-	const int progID = current;
-	const renderProg_t& prog = renderProgs[progID];
-
-	//GL_CheckErrors();
-
-	ALIGNTYPE16 idVec4 localVectors[RENDERPARM_TOTAL];
-
-	auto commitarray = [&]( idVec4( &vectors )[ RENDERPARM_TOTAL ] , shader_t& shader )
+	if( currentDecl == nullptr || currentRenderProgram < 0 || currentRenderProgram >= glslPrograms.Num() )
 	{
-		const int numUniforms = shader.uniforms.Num();
-		if( shader.uniformArray != -1 && numUniforms > 0 )
-		{
-			int totalUniforms = 0;
-			for( int i = 0; i < numUniforms; ++i )
-			{
-				// RB: HACK rpShadowMatrices[6 * 4]
-				if( shader.uniforms[i] == RENDERPARM_SHADOW_MATRIX_0_X )
-				{
-					for( int j = 0; j < ( 6 * 4 ); j++ )
-					{
-						vectors[i + j] = uniforms[ shader.uniforms[i] + j];
-						totalUniforms++;
-					}
-
-				}
-				else
-				{
-					vectors[i] = uniforms[ shader.uniforms[i] ];
-					totalUniforms++;
-				}
-			}
-			glUniform4fv( shader.uniformArray, totalUniforms, localVectors->ToFloatPtr() );
-		}
-	};
-
-	if( prog.vertexShaderIndex >= 0 )
+		return;
+	}
+	programEntry_t& prog = glslPrograms[ currentRenderProgram ];
+	if( prog.vertexModule == VK_NULL_HANDLE || prog.descriptorSetLayout == VK_NULL_HANDLE )
 	{
-		commitarray( localVectors, shaders[ prog.vertexShaderIndex ] );
+		// the upload failed; skip the draw instead of binding garbage
+		return;
 	}
 
-	if( prog.fragmentShaderIndex >= 0 )
-	{
-		commitarray( localVectors, shaders[ prog.fragmentShaderIndex ] );
-	}
-
-#endif
-
-	renderProg_t& prog = renderProgs[ current ];
-
-	VkPipeline pipeline = prog.GetPipeline( stateBits, shaders[ prog.vertexShaderIndex ].module, shaders[ prog.fragmentShaderIndex ].module );
+	VkPipeline pipeline = GetPipeline( prog, stateBits );
 
 	VkDescriptorSetAllocateInfo setAllocInfo = {};
 	setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1199,7 +780,7 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 
 	int writeIndex = 0;
 	int bufferIndex = 0;
-	int	imageIndex = 0;
+	int imageIndex = 0;
 	int bindingIndex = 0;
 
 	VkWriteDescriptorSet writes[ MAX_DESC_SET_WRITES ];
@@ -1210,10 +791,9 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 	idUniformBuffer* ubos[ 3 ] = { NULL, NULL, NULL };
 
 	idUniformBuffer vertParms;
-	if( prog.vertexShaderIndex > -1 && shaders[ prog.vertexShaderIndex ].parmIndices.Num() > 0 )
+	if( prog.vertexParmIndices.Num() > 0 )
 	{
-		AllocParmBlockBuffer( shaders[ prog.vertexShaderIndex ].parmIndices, vertParms );
-
+		AllocParmBlockBuffer( prog.vertexParmIndices, vertParms );
 		ubos[ uboIndex++ ] = &vertParms;
 	}
 
@@ -1226,35 +806,34 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 			return;
 		}
 		assert( ( jointBuffer.GetOffset() & ( vkcontext.gpu->props.limits.minUniformBufferOffsetAlignment - 1 ) ) == 0 );
-
 		ubos[ uboIndex++ ] = &jointBuffer;
 	}
-	else if( prog.optionalSkinning )
+	else if( prog.usesJoints )
 	{
+		// no joint buffer is bound for this draw; the block still needs a
+		// buffer behind it
 		ubos[ uboIndex++ ] = &emptyUBO;
 	}
 
 	idUniformBuffer fragParms;
-	if( prog.fragmentShaderIndex > -1 && shaders[ prog.fragmentShaderIndex ].parmIndices.Num() > 0 )
+	if( prog.fragmentParmIndices.Num() > 0 )
 	{
-		AllocParmBlockBuffer( shaders[ prog.fragmentShaderIndex ].parmIndices, fragParms );
-
+		AllocParmBlockBuffer( prog.fragmentParmIndices, fragParms );
 		ubos[ uboIndex++ ] = &fragParms;
 	}
 
 	for( int i = 0; i < prog.bindings.Num(); ++i )
 	{
-		rpBinding_t binding = prog.bindings[ i ];
-
-		switch( binding )
+		switch( prog.bindings[ i ] )
 		{
 			case BINDING_TYPE_UNIFORM_BUFFER:
 			{
 				idUniformBuffer* ubo = ubos[ bufferIndex ];
+				ubo->DebugCheck();
 
 				VkDescriptorBufferInfo& bufferInfo = bufferInfos[ bufferIndex++ ];
 				memset( &bufferInfo, 0, sizeof( VkDescriptorBufferInfo ) );
-				bufferInfo.buffer = ubo->GetAPIObject();
+				bufferInfo.buffer = ubo->GetBuffer();
 				bufferInfo.offset = ubo->GetOffset();
 				bufferInfo.range = ubo->GetSize();
 
@@ -1290,7 +869,6 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 				write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 				write.pImageInfo = &imageInfo;
 
-				//imageIndex++;
 				break;
 			}
 		}
@@ -1310,20 +888,30 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 		pipeline );
 }
 
+/*
+========================
+idRenderProgManager::CachePipeline
+========================
+*/
 void idRenderProgManager::CachePipeline( uint64 stateBits )
 {
-	renderProg_t& prog = renderProgs[ current ];
-
-	/*VkPipeline pipeline = */
-	prog.GetPipeline( stateBits, shaders[ prog.vertexShaderIndex ].module, shaders[ prog.fragmentShaderIndex ].module );
+	if( currentDecl == nullptr || currentRenderProgram < 0 || currentRenderProgram >= glslPrograms.Num() )
+	{
+		return;
+	}
+	GetPipeline( glslPrograms[ currentRenderProgram ], stateBits );
 }
 
-
+/*
+========================
+idRenderProgManager::PrintPipelines
+========================
+*/
 void idRenderProgManager::PrintPipelines()
 {
-	for( int i = 0; i < renderProgManager.renderProgs.Num(); ++i )
+	for( int i = 0; i < glslPrograms.Num(); ++i )
 	{
-		renderProg_t& prog = renderProgManager.renderProgs[ i ];
+		programEntry_t& prog = glslPrograms[ i ];
 		for( int j = 0; j < prog.pipelines.Num(); ++j )
 		{
 			idLib::Printf( "%s: %llu\n", prog.name.c_str(), prog.pipelines[ j ].stateBits );
@@ -1334,11 +922,16 @@ void idRenderProgManager::PrintPipelines()
 	}
 }
 
+/*
+========================
+idRenderProgManager::ClearPipelines
+========================
+*/
 void idRenderProgManager::ClearPipelines()
 {
-	for( int i = 0; i < renderProgManager.renderProgs.Num(); ++i )
+	for( int i = 0; i < glslPrograms.Num(); ++i )
 	{
-		renderProg_t& prog = renderProgManager.renderProgs[ i ];
+		programEntry_t& prog = glslPrograms[ i ];
 		for( int j = 0; j < prog.pipelines.Num(); ++j )
 		{
 			vkDestroyPipeline( vkcontext.device, prog.pipelines[ j ].pipeline, NULL );

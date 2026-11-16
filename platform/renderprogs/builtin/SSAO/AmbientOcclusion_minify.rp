@@ -1,0 +1,141 @@
+/*
+===========================================================================
+
+Doom 3 BFG Edition GPL Source Code
+Copyright (C) 1993-2012 id Software LLC, a ZeniMax Media company.
+
+This file is part of the Doom 3 BFG Edition GPL Source Code ("Doom 3 BFG Edition Source Code").
+
+Doom 3 BFG Edition Source Code is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Doom 3 BFG Edition Source Code is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with Doom 3 BFG Edition Source Code.  If not, see <http://www.gnu.org/licenses/>.
+
+In addition, the Doom 3 BFG Edition Source Code is also subject to certain additional terms. You should have received a copy of these additional terms immediately following the terms and conditions of the GNU General Public License which accompanied the Doom 3 BFG Edition Source Code.  If not, please request a copy in writing from id Software at the address below.
+
+If you have questions concerning this license or the applicable additional terms, you may contact in writing id Software LLC, c/o ZeniMax Media Inc., Suite 120, Rockville, Maryland 20850 USA.
+
+===========================================================================
+*/
+
+/*
+ * Generated from platform/renderprogs/builtin/SSAO/AmbientOcclusion_minify.vs.hlsl and platform/renderprogs/builtin/SSAO/AmbientOcclusion_minify.ps.hlsl
+ * (RBDOOM-3-BFG GPL shader sources) for the renderprog decl system, whose
+ * engine code is adapted from the Wolfenstein: The New Order decl
+ * renderprog re-implementation on this engine's idlib.
+ */
+
+renderProg builtin/SSAO/AmbientOcclusion_minify {
+	hlsl_vp {
+		// *INDENT-OFF*
+		struct VS_IN
+		{
+			float4 position : POSITION;
+			float2 texcoord : TEXCOORD0;
+		};
+
+		struct VS_OUT
+		{
+			float4 position : POSITION;
+			float2 texcoord0 : TEXCOORD0;
+		};
+		// *INDENT-ON*
+
+		void main( VS_IN vertex, out VS_OUT result )
+		{
+			result.position = vertex.position;
+			result.texcoord0 = vertex.texcoord;
+		}
+	}
+	hlsl_fp {
+		/**
+		 \file AmbientOcclusion_minify.pix
+		 \author Morgan McGuire and Michael Mara, NVIDIA Research
+
+		  Open Source under the "BSD" license: http://www.opensource.org/licenses/bsd-license.php
+
+		  Copyright (c) 2011-2012, NVIDIA
+		  Copyright (c) 2016 Robert Beckebans ( id Tech 4.x integration )
+		  All rights reserved.
+
+		  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+		  Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+		  Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+		  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+		 */
+
+		// *INDENT-OFF*
+		uniform sampler2D samp0 : register( s0 ); // zbuffer
+
+		struct PS_IN
+		{
+			float2 texcoord0 : TEXCOORD0;
+		};
+
+		struct PS_OUT
+		{
+			float4 color : COLOR;
+		};
+		// *INDENT-ON*
+
+		//#extension GL_EXT_gpu_shader4 : enable
+
+		//#expect USE_PEELED_DEPTH_BUFFER "binary"
+
+		#if 0 //( USE_PEELED_DEPTH_BUFFER != 0 )
+			#define mask rg
+		#else
+			#define mask r
+		#endif
+
+		float reconstructCSZ( float d )
+		{
+			//return clipInfo[0] / (clipInfo[1] * d + clipInfo[2]);
+
+			// infinite far perspective matrix
+			return -3.0 / ( -1.0 * d + 1.0 );
+
+			//d = d * 2.0 - 1.0;
+			//return -rpProjectionMatrixZ.w / ( -rpProjectionMatrixZ.z - d );
+		}
+
+		void main( PS_IN fragment, out PS_OUT result )
+		{
+		#if defined(BRIGHTPASS)
+			float2 ssC = fragment.texcoord0;
+			float depth = tex2D( samp0, ssC ).r;
+			//depth = reconstructCSZ( depth );
+			result.color.mask = depth;
+		#else
+			//int2 ssP = int2( gl_FragCoord.xy );
+			int2 ssP = int2( fragment.texcoord0 * rpScreenCorrectionFactor.zw );
+
+			int previousMIPNumber = int( rpJitterTexScale.x );
+
+			// Rotated grid subsampling to avoid XY directional bias or Z precision bias while downsampling.
+			// On DX9, the bit-and can be implemented with floating-point modulo
+			//result.color.mask = texture( samp0, clamp( ssP * 2 + int2( ssP.y & 1, ssP.x & 1 ), int2( 0 ), textureSize( samp0, previousMIPNumber ) - int2( 1 ) ) * rpScreenCorrectionFactor.xy, previousMIPNumber ).mask;
+			result.color.mask = texelFetch( samp0, clamp( ssP * 2 + int2( ssP.y & 1, ssP.x & 1 ), int2( 0 ), textureSize( samp0, previousMIPNumber ) - int2( 1 ) ), previousMIPNumber ).mask;
+			//result.color.mask = texelFetch2D( samp0, int3( ssP * 2 + int2( ( ssP.y & 1 ) ^ 1, ( ssP.x & 1 ) ^ 1 ), 0 ) );
+
+			// result.color.mask = texelFetch( samp0, ssP, 0 ).r;
+
+			//float2 ssC = float2( ssP * 2 + int2( ( ssP.y & 1 ) ^ 1, ( ssP.x & 1 ) ^ 1 ) ) * rpScreenCorrectionFactor.xy;
+			//float2 ssC = float2( ssP ) * rpScreenCorrectionFactor.xy;
+			//float2 ssC = fragment.texcoord0;
+			//float depth = tex2D( samp0, ssC ).r;
+			//result.color.mask = depth;
+		#endif
+		}
+	}
+}

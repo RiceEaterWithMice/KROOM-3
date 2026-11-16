@@ -84,6 +84,7 @@ typedef enum
 
 	// new decl types can be added here
 	DECL_ATMOS,		// procedural sky
+	DECL_RENDERPROG,	// render program
 
 	DECL_MAX_TYPES			= 32
 } declType_t;
@@ -426,3 +427,4 @@ ID_INLINE void idPrintDecls_f( const idCmdArgs& args )
 }
 
 #endif /* !__DECLMANAGER_H__ */
+

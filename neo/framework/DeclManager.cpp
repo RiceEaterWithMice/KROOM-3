@@ -32,6 +32,8 @@ If you have questions concerning this license or the applicable additional terms
 #include "precompiled.h"
 #pragma hdrstop
 
+#include "../renderer/DeclRenderProg.h"
+
 /*
 
 GUIs and script remain separately parsed
@@ -907,8 +909,14 @@ void idDeclManagerLocal::Init()
 
 	RegisterDeclType( "atmos",				DECL_ATMOS,			idDeclAllocator<idDeclAtmos> );
 
+	RegisterDeclType( "renderProg",			DECL_RENDERPROG,	idDeclAllocator<idDeclRenderProg> );
+
 	RegisterDeclFolder( "materials",		".mtr",				DECL_MATERIAL );
 	RegisterDeclFolder( "atmos",			".atmos",			DECL_ATMOS );
+	// registered during Init() so the renderprog decls exist before the
+	// renderer initializes and idRenderProgManager::Init() resolves the
+	// builtin shaders
+	RegisterDeclFolder( "renderprogs",	".rp",				DECL_RENDERPROG );
 
 	// add console commands
 	cmdSystem->AddCommand( "listDecls", ListDecls_f, CMD_FL_SYSTEM, "lists all decls" );
@@ -926,6 +934,7 @@ void idDeclManagerLocal::Init()
 	cmdSystem->AddCommand( "listParticles", idListDecls_f<DECL_PARTICLE>, CMD_FL_SYSTEM, "lists particle systems", idCmdSystem::ArgCompletion_String<listDeclStrings> );
 	cmdSystem->AddCommand( "listAF", idListDecls_f<DECL_AF>, CMD_FL_SYSTEM, "lists articulated figures", idCmdSystem::ArgCompletion_String<listDeclStrings> );
 	cmdSystem->AddCommand( "listAtmos", idListDecls_f<DECL_ATMOS>, CMD_FL_SYSTEM, "lists atmos decls", idCmdSystem::ArgCompletion_String<listDeclStrings> );
+	cmdSystem->AddCommand( "listRenderProgs", idListDecls_f<DECL_RENDERPROG>, CMD_FL_SYSTEM, "lists renderprog decls", idCmdSystem::ArgCompletion_String<listDeclStrings> );
 
 	cmdSystem->AddCommand( "printTable", idPrintDecls_f<DECL_TABLE>, CMD_FL_SYSTEM, "prints a table", idCmdSystem::ArgCompletion_Decl<DECL_TABLE> );
 	cmdSystem->AddCommand( "printMaterial", idPrintDecls_f<DECL_MATERIAL>, CMD_FL_SYSTEM, "prints a material", idCmdSystem::ArgCompletion_Decl<DECL_MATERIAL> );
@@ -937,6 +946,7 @@ void idDeclManagerLocal::Init()
 	cmdSystem->AddCommand( "printParticle", idPrintDecls_f<DECL_PARTICLE>, CMD_FL_SYSTEM, "prints a particle system", idCmdSystem::ArgCompletion_Decl<DECL_PARTICLE> );
 	cmdSystem->AddCommand( "printAF", idPrintDecls_f<DECL_AF>, CMD_FL_SYSTEM, "prints an articulated figure", idCmdSystem::ArgCompletion_Decl<DECL_AF> );
 	cmdSystem->AddCommand( "printAtmos", idPrintDecls_f<DECL_ATMOS>, CMD_FL_SYSTEM, "prints an atmosphere", idCmdSystem::ArgCompletion_Decl<DECL_ATMOS> );
+	cmdSystem->AddCommand( "printRenderProg", idPrintDecls_f<DECL_RENDERPROG>, CMD_FL_SYSTEM, "prints a renderprog", idCmdSystem::ArgCompletion_Decl<DECL_RENDERPROG> );
 
 	cmdSystem->AddCommand( "listHuffmanFrequencies", ListHuffmanFrequencies_f, CMD_FL_SYSTEM, "lists decl text character frequencies" );
 
