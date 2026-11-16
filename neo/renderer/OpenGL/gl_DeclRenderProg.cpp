@@ -34,6 +34,10 @@ If you have questions concerning this license or the applicable additional terms
 #include "../RenderProgParm.h"
 #include "../RenderCommon.h"
 
+// defined in RenderProgs_GL.cpp; gates the shader compiler messages
+// printed below, like the legacy compile path did
+extern idCVar r_displayGLSLCompilerMessages;
+
 idCVar r_dumpGeneratedGLSL( "r_dumpGeneratedGLSL", "0", CVAR_BOOL, "dump the GLSL generated for renderprog decls into generated/glsl" );
 
 /*
@@ -60,7 +64,8 @@ static unsigned int CompileGLSL( const idStr & programGLSL, bool isVertexProgram
 
 		// catch the strings the ATI and Intel drivers output on success
 		if ( strstr( infoLog.Ptr(), "successfully compiled to run on hardware" ) == NULL &&
-			 strstr( infoLog.Ptr(), "No errors." ) == NULL ) {
+			 strstr( infoLog.Ptr(), "No errors." ) == NULL &&
+			 r_displayGLSLCompilerMessages.GetBool() ) {
 			idLib::Printf( "While compiling %s program %s from %s\n",
 						   isVertexProgram ? "vertex" : "fragment", name, fileName );
 			idLib::Printf( "-----------------\n" );
