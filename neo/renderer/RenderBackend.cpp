@@ -5576,7 +5576,7 @@ void idRenderBackend::DrawViewInternal( const viewDef_t* _viewDef )
 
 #if !defined(USE_VULKAN)
 	// bind one global Vertex Array Object (VAO)
-	glBindVertexArray( glConfig.global_vao );
+	glBindVertexArray( glcontext.global_vao );
 #endif
 
 	//------------------------------------

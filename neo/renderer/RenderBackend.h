@@ -234,6 +234,9 @@ struct glContext_t
 	// for GL_TIME_ELAPSED_EXT queries
 	GLuint		renderLogMainBlockTimeQueryIds[ NUM_FRAME_DATA ][ MRB_TOTAL_QUERIES ];
 	uint32		renderLogMainBlockTimeQueryIssued[ NUM_FRAME_DATA ][ MRB_TOTAL_QUERIES ];
+
+	// one global vertex array object
+	GLuint		global_vao;
 };
 
 extern glContext_t glcontext;

@@ -453,8 +453,8 @@ static void R_CheckPortableExtensions()
 	}
 
 	// generate one global Vertex Array Object (VAO)
-	glGenVertexArrays( 1, &glConfig.global_vao );
-	glBindVertexArray( glConfig.global_vao );
+	glGenVertexArrays( 1, &glcontext.global_vao );
+	glBindVertexArray( glcontext.global_vao );
 }
 // RB end
 

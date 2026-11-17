@@ -31,10 +31,6 @@ If you have questions concerning this license or the applicable additional terms
 #ifndef __RENDERER_H__
 #define __RENDERER_H__
 
-#if !defined( USE_VULKAN )
-#include <glad/gl.h>
-#endif
-
 /*
 ===============================================================================
 
@@ -229,11 +225,6 @@ struct glconfig_t
 	int					isFullscreen;					// monitor number
 	int					multisamples;
 
-	// RB begin
-#if !defined(USE_VULKAN)
-	GLuint				global_vao;
-#endif
-	// RB end
 
 	bool				forceShaderGeneration;
 };
