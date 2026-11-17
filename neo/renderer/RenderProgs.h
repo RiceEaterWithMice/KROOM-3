@@ -1006,17 +1006,6 @@ private:
 	idList<shader_t, TAG_RENDER>				shaders;
 
 	idStaticList < idVec4, RENDERPARM_TOTAL >	uniforms;
-
-#if defined( USE_VULKAN )
-	int					counter;
-	int					currentData;
-	int					currentDescSet;
-	int					currentParmBufferOffset;
-	VkDescriptorPool	descriptorPools[ NUM_FRAME_DATA ];
-	VkDescriptorSet		descriptorSets[ NUM_FRAME_DATA ][ MAX_DESC_SETS ];
-
-	idUniformBuffer* 	parmBuffers[ NUM_FRAME_DATA ];
-#endif
 };
 
 extern idRenderProgManager renderProgManager;

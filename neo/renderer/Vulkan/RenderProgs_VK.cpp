@@ -233,12 +233,12 @@ idRenderProgManager::StartFrame
 */
 void idRenderProgManager::StartFrame()
 {
-	counter++;
-	currentData = counter % NUM_FRAME_DATA;
-	currentDescSet = 0;
-	currentParmBufferOffset = 0;
+	vkRenderProgContext.counter++;
+	vkRenderProgContext.currentData = vkRenderProgContext.counter % NUM_FRAME_DATA;
+	vkRenderProgContext.currentDescSet = 0;
+	vkRenderProgContext.currentParmBufferOffset = 0;
 
-	vkResetDescriptorPool( vkcontext.device, descriptorPools[ currentData ], 0 );
+	vkResetDescriptorPool( vkcontext.device, vkRenderProgContext.descriptorPools[ vkRenderProgContext.currentData ], 0 );
 }
 
 /*
@@ -627,26 +627,26 @@ void idRenderProgManager::KillAllShaders()
 
 	for( int i = 0; i < NUM_FRAME_DATA; ++i )
 	{
-		parmBuffers[ i ]->FreeBufferObject();
-		delete parmBuffers[ i ];
-		parmBuffers[ i ] = NULL;
+		vkRenderProgContext.parmBuffers[ i ]->FreeBufferObject();
+		delete vkRenderProgContext.parmBuffers[ i ];
+		vkRenderProgContext.parmBuffers[ i ] = NULL;
 	}
 
 	emptyUBO.FreeBufferObject();
 
 	for( int i = 0; i < NUM_FRAME_DATA; ++i )
 	{
-		//vkFreeDescriptorSets( vkcontext.device, descriptorPools[ i ], MAX_DESC_SETS, descriptorSets[ i ] );
-		vkResetDescriptorPool( vkcontext.device, descriptorPools[ i ], 0 );
-		vkDestroyDescriptorPool( vkcontext.device, descriptorPools[ i ], NULL );
+		//vkFreeDescriptorSets( vkcontext.device, vkRenderProgContext.descriptorPools[ i ], MAX_DESC_SETS, vkRenderProgContext.descriptorSets[ i ] );
+		vkResetDescriptorPool( vkcontext.device, vkRenderProgContext.descriptorPools[ i ], 0 );
+		vkDestroyDescriptorPool( vkcontext.device, vkRenderProgContext.descriptorPools[ i ], NULL );
 	}
 
-	memset( descriptorSets, 0, sizeof( descriptorSets ) );
-	memset( descriptorPools, 0, sizeof( descriptorPools ) );
+	memset( vkRenderProgContext.descriptorSets, 0, sizeof( vkRenderProgContext.descriptorSets ) );
+	memset( vkRenderProgContext.descriptorPools, 0, sizeof( vkRenderProgContext.descriptorPools ) );
 
-	counter = 0;
-	currentData = 0;
-	currentDescSet = 0;
+	vkRenderProgContext.counter = 0;
+	vkRenderProgContext.currentData = 0;
+	vkRenderProgContext.currentDescSet = 0;
 }
 
 /*
@@ -661,7 +661,7 @@ void idRenderProgManager::AllocParmBlockBuffer( const idList<int>& parmIndices, 
 	const int numParms = parmIndices.Num();
 	const int bytes = ALIGN( numParms * sizeof( idVec4 ), vkcontext.gpu->props.limits.minUniformBufferOffsetAlignment );
 
-	ubo.Reference( *parmBuffers[ currentData ], currentParmBufferOffset, bytes );
+	ubo.Reference( *vkRenderProgContext.parmBuffers[ vkRenderProgContext.currentData ], vkRenderProgContext.currentParmBufferOffset, bytes );
 
 	idVec4* gpuUniforms = ( idVec4* )ubo.MapBuffer( BM_WRITE );
 
@@ -672,7 +672,7 @@ void idRenderProgManager::AllocParmBlockBuffer( const idList<int>& parmIndices, 
 
 	ubo.UnmapBuffer();
 
-	currentParmBufferOffset += bytes;
+	vkRenderProgContext.currentParmBufferOffset += bytes;
 }
 
 /*
@@ -1188,14 +1188,14 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 	VkDescriptorSetAllocateInfo setAllocInfo = {};
 	setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	setAllocInfo.pNext = NULL;
-	setAllocInfo.descriptorPool = descriptorPools[ currentData ];
+	setAllocInfo.descriptorPool = vkRenderProgContext.descriptorPools[ vkRenderProgContext.currentData ];
 	setAllocInfo.descriptorSetCount = 1;
 	setAllocInfo.pSetLayouts = &prog.descriptorSetLayout;
 
-	ID_VK_CHECK( vkAllocateDescriptorSets( vkcontext.device, &setAllocInfo, &descriptorSets[ currentData ][ currentDescSet ] ) );
+	ID_VK_CHECK( vkAllocateDescriptorSets( vkcontext.device, &setAllocInfo, &vkRenderProgContext.descriptorSets[ vkRenderProgContext.currentData ][ vkRenderProgContext.currentDescSet ] ) );
 
-	VkDescriptorSet descSet = descriptorSets[ currentData ][ currentDescSet ];
-	currentDescSet++;
+	VkDescriptorSet descSet = vkRenderProgContext.descriptorSets[ vkRenderProgContext.currentData ][ vkRenderProgContext.currentDescSet ];
+	vkRenderProgContext.currentDescSet++;
 
 	int writeIndex = 0;
 	int bufferIndex = 0;

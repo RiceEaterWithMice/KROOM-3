@@ -219,6 +219,22 @@ struct vulkanContext_t
 
 extern vulkanContext_t vkcontext;
 
+// per-frame Vulkan state owned by the render program manager
+class idUniformBuffer;
+struct vkRenderProgContext_t
+{
+	int					counter;
+	int					currentData;
+	int					currentDescSet;
+	int					currentParmBufferOffset;
+	VkDescriptorPool	descriptorPools[ NUM_FRAME_DATA ];
+	VkDescriptorSet		descriptorSets[ NUM_FRAME_DATA ][ MAX_DESC_SETS ];
+
+	idUniformBuffer*	parmBuffers[ NUM_FRAME_DATA ];
+};
+
+extern vkRenderProgContext_t vkRenderProgContext;
+
 #else //if defined( ID_OPENGL )
 
 #include <glad/gl.h>
