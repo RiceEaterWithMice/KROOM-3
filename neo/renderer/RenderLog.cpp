@@ -61,9 +61,6 @@ const char* renderLogMainBlockLabels[] =
 	ASSERT_ENUM_STRING( MRB_TOTAL,							14 )
 };
 
-#if defined( USE_VULKAN )
-	compile_time_assert( NUM_TIMESTAMP_QUERIES >= ( MRB_TOTAL_QUERIES ) );
-#endif
 
 extern uint64 Sys_Microseconds();
 /*
@@ -89,14 +86,6 @@ struct pixEvent_t
 
 idCVar r_pix( "r_pix", "0", CVAR_INTEGER, "print GPU/CPU event timing" );
 
-#if !defined( USE_VULKAN )
-	static const int	MAX_PIX_EVENTS = 256;
-	// defer allocation of this until needed, so we don't waste lots of memory
-	pixEvent_t* 		pixEvents;	// [MAX_PIX_EVENTS]
-	int					numPixEvents;
-	int					numPixLevels;
-	static GLuint		timeQueryIds[MAX_PIX_EVENTS];
-#endif
 
 /*
 ========================
@@ -107,43 +96,7 @@ FIXME: this is not thread safe on the PC
 */
 void PC_BeginNamedEvent( const char* szName, const idVec4& color )
 {
-#if defined( USE_VULKAN )
-
-	// start an annotated group of calls under the this name
-	// SRS - Prefer VK_EXT_debug_utils over VK_EXT_debug_marker/VK_EXT_debug_report (deprecated by VK_EXT_debug_utils)
-	if( vkcontext.debugUtilsSupportAvailable )
-	{
-		VkDebugUtilsLabelEXT label = {};
-		label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-		label.pLabelName = szName;
-		label.color[0] = color.x;
-		label.color[1] = color.y;
-		label.color[2] = color.z;
-		label.color[3] = color.w;
-
-		qvkCmdBeginDebugUtilsLabelEXT( vkcontext.commandBuffer[ vkcontext.frameParity ], &label );
-	}
-	else if( vkcontext.debugMarkerSupportAvailable )
-	{
-		VkDebugMarkerMarkerInfoEXT  label = {};
-		label.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_MARKER_INFO_EXT;
-		label.pMarkerName = szName;
-		label.color[0] = color.x;
-		label.color[1] = color.y;
-		label.color[2] = color.z;
-		label.color[3] = color.w;
-
-		qvkCmdDebugMarkerBeginEXT( vkcontext.commandBuffer[ vkcontext.frameParity ], &label );
-	}
-#else
-	// RB: colors are not supported in OpenGL
-
-	// only do this if RBDOOM-3-BFG was started by RenderDoc or some similar tool
-	if( glConfig.gremedyStringMarkerAvailable && glConfig.khronosDebugAvailable )
-	{
-		glPushDebugGroup( GL_DEBUG_SOURCE_APPLICATION_ARB, 0, GLsizei( strlen( szName ) ), szName );
-	}
-#endif
+	RB_BeginNamedEvent( szName, color );
 
 #if 0
 	if( !r_pix.GetBool() )
@@ -190,23 +143,7 @@ PC_EndNamedEvent
 */
 void PC_EndNamedEvent()
 {
-#if defined( USE_VULKAN )
-	// SRS - Prefer VK_EXT_debug_utils over VK_EXT_debug_marker/VK_EXT_debug_report (deprecated by VK_EXT_debug_utils)
-	if( vkcontext.debugUtilsSupportAvailable )
-	{
-		qvkCmdEndDebugUtilsLabelEXT( vkcontext.commandBuffer[ vkcontext.frameParity ] );
-	}
-	else if( vkcontext.debugMarkerSupportAvailable )
-	{
-		qvkCmdDebugMarkerEndEXT( vkcontext.commandBuffer[ vkcontext.frameParity ] );
-	}
-#else
-	// only do this if RBDOOM-3-BFG was started by RenderDoc or some similar tool
-	if( glConfig.gremedyStringMarkerAvailable && glConfig.khronosDebugAvailable )
-	{
-		glPopDebugGroup();
-	}
-#endif
+	RB_EndNamedEvent();
 
 #if 0
 	if( !r_pix.GetBool() )
@@ -472,7 +409,6 @@ idRenderLog::Printf
 */
 void idRenderLog::Printf( const char* fmt, ... )
 {
-#if !defined(USE_VULKAN)
 	if( activeLevel <= LOG_LEVEL_BLOCKS_ONLY )
 	{
 		return;
@@ -506,7 +442,6 @@ void idRenderLog::Printf( const char* fmt, ... )
 
 
 //	logFile->Flush();		this makes it take waaaay too long
-#endif
 }
 
 /*
@@ -526,7 +461,6 @@ void idRenderLog::LogOpenBlock( renderLogIndentLabel_t label, const char* fmt, .
 		//logFile->Printf( "%s%1.1f msec gap from last closeblock\n", indentString, ( now - closeBlockTime ) * ( 1.0f / 1000.0f ) );
 		//}
 
-#if !defined(USE_VULKAN)
 		if( glConfig.gremedyStringMarkerAvailable )
 		{
 			//Printf( fmt, args );
@@ -552,7 +486,6 @@ void idRenderLog::LogOpenBlock( renderLogIndentLabel_t label, const char* fmt, .
 
 			glStringMarkerGREMEDY( out.Length(), out.c_str() );
 		}
-#endif
 	}
 
 	Indent( label );
@@ -611,40 +544,7 @@ void idRenderLog::OpenMainBlock( renderLogMainBlock_t block )
 	{
 		mainBlock = block;
 
-#if defined( USE_VULKAN )
-		if( vkcontext.queryIndex[ vkcontext.frameParity ] >= ( NUM_TIMESTAMP_QUERIES - 1 ) )
-		{
-			return;
-		}
-
-		VkCommandBuffer commandBuffer = vkcontext.commandBuffer[ vkcontext.frameParity ];
-		VkQueryPool queryPool = vkcontext.queryPools[ vkcontext.frameParity ];
-
-		uint32 queryIndex = vkcontext.queryAssignedIndex[ vkcontext.frameParity ][ mainBlock * 2 + 0 ] = vkcontext.queryIndex[ vkcontext.frameParity ]++;
-		vkCmdWriteTimestamp( commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, queryIndex );
-
-#elif defined(__APPLE__)
-		// SRS - For OSX use elapsed time query for Apple OpenGL 4.1 using GL_TIME_ELAPSED vs GL_TIMESTAMP (which is not implemented on OSX)
-		// SRS - OSX AMD drivers have a rendering bug (flashing colours) with an elasped time query when Shadow Mapping is on - turn off query for that case unless r_skipAMDWorkarounds is set
-		if( !r_useShadowMapping.GetBool() || glConfig.vendor != VENDOR_AMD || r_skipAMDWorkarounds.GetBool() )
-		{
-			if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ mainBlock * 2 + 1 ] == 0 )
-			{
-				glGenQueries( 1, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ mainBlock * 2 + 1 ] );
-			}
-
-			glBeginQuery( GL_TIME_ELAPSED_EXT, glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ mainBlock * 2 + 1 ] );
-		}
-
-#else
-		if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ mainBlock * 2 ] == 0 )
-		{
-			glCreateQueries( GL_TIMESTAMP, 2, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ mainBlock * 2 ] );
-		}
-
-		glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ mainBlock * 2 + 0 ], GL_TIMESTAMP );
-		glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ mainBlock * 2 + 0 ]++;
-#endif
+		RB_OpenMainBlockTimestamp( block );
 	}
 }
 
@@ -659,31 +559,7 @@ void idRenderLog::CloseMainBlock()
 	if( glConfig.timerQueryAvailable )
 	{
 
-#if defined( USE_VULKAN )
-		if( vkcontext.queryIndex[ vkcontext.frameParity ] >= ( NUM_TIMESTAMP_QUERIES - 1 ) )
-		{
-			return;
-		}
-
-		VkCommandBuffer commandBuffer = vkcontext.commandBuffer[ vkcontext.frameParity ];
-		VkQueryPool queryPool = vkcontext.queryPools[ vkcontext.frameParity ];
-
-		uint32 queryIndex = vkcontext.queryAssignedIndex[ vkcontext.frameParity ][ mainBlock * 2 + 1 ] = vkcontext.queryIndex[ vkcontext.frameParity ]++;
-		vkCmdWriteTimestamp( commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, queryIndex );
-
-#elif defined(__APPLE__)
-		// SRS - For OSX use elapsed time query for Apple OpenGL 4.1 using GL_TIME_ELAPSED vs GL_TIMESTAMP (which is not implemented on OSX)
-		// SRS - OSX AMD drivers have a rendering bug (flashing colours) with an elasped time query when Shadow Mapping is on - turn off query for that case unless r_skipAMDWorkarounds is set
-		if( !r_useShadowMapping.GetBool() || glConfig.vendor != VENDOR_AMD || r_skipAMDWorkarounds.GetBool() )
-		{
-			glEndQuery( GL_TIME_ELAPSED_EXT );
-			glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ mainBlock * 2 + 1 ]++;
-		}
-
-#else
-		glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ mainBlock * 2 + 1 ], GL_TIMESTAMP );
-		glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ mainBlock * 2 + 1 ]++;
-#endif
+		RB_CloseMainBlockTimestamp( block );
 	}
 }
 

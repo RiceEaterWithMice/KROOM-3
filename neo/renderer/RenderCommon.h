@@ -1210,11 +1210,9 @@ extern idCVar r_softParticles;				// 1 = fade particles against the opaque scene
 extern idCVar r_defaultParticleSoftness;	// auto softness as a fraction of the largest billboard size
 extern idCVar r_softParticleNearFade;
 
-#if !defined( USE_VULKAN )
 	extern idCVar r_glVersionMajor;
 	extern idCVar r_glVersionMinor;
 	extern idCVar r_glProfile;
-#endif
 
 extern idCVar r_useOcclusionGeometry;		// use dmap generated occlusion geometry (.ocl) for static shadow casters
 

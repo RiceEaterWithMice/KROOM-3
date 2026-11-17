@@ -43,6 +43,18 @@ extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE1;
 extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE2;
 extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE3;
 
+// backend hooks for raw API calls in shared renderer code
+void RB_BeginNamedEvent( const char* szName, const idVec4& color );
+void RB_EndNamedEvent();
+void RB_OpenMainBlockTimestamp( renderLogMainBlock_t block );
+void RB_CloseMainBlockTimestamp( renderLogMainBlock_t block );
+void RB_ExecuteBackEndCommands( const emptyCommand_t* cmdHead );
+void RB_FinishRenderingGpuTiming( uint64* gpuMicroSec );
+void RB_CaptureRenderToFile( const char* fileName, const idScreenRect& rc );
+void RB_ReadTiledPixels( int width, int height, byte* buffer, renderView_t* ref, int sysWidth, int sysHeight );
+// target buffer value for set buffer commands differs between the backends, defined in the backend impl files
+extern const int BACK_BUFFER_TARGET;
+
 // backend hooks for raw API calls in shared backend code
 void GL_BindShadowMapFBO( int shadowLOD, int side );
 void GL_ReadHDR64Pixels( float* image );

@@ -2578,3 +2578,407 @@ void idRenderBackend::DrawScreenSpaceGlobalIlluminationGL( const viewDef_t* _vie
 
 	//GL_CheckErrors();
 }
+
+// backend specific cvars moved out of RenderSystem_init.cpp
+idCVar r_skipPostProcess( "r_skipPostProcess", "0", CVAR_RENDERER | CVAR_BOOL, "skip all post-process renderings except bloom" );
+idCVar r_useHDR( "r_useHDR", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "Use high dynamic range rendering" );
+idCVar r_forceAmbient( "r_forceAmbient", "0.01", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "render additional ambient pass to make the game less dark", 0.0f, 1.0f );
+idCVar r_useSSAO( "r_useSSAO", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "use screen space ambient occlusion to darken corners" );
+
+// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#define BUGFIXEDSCREENSHOTRESOLUTION 1
+
+// backend hooks used by the shared renderer code
+
+void RB_BeginNamedEvent( const char* szName, const idVec4& color )
+{
+	// RB: colors are not supported in OpenGL
+
+	// only do this if RBDOOM-3-BFG was started by RenderDoc or some similar tool
+	if( glConfig.gremedyStringMarkerAvailable && glConfig.khronosDebugAvailable )
+	{
+		glPushDebugGroup( GL_DEBUG_SOURCE_APPLICATION_ARB, 0, GLsizei( strlen( szName ) ), szName );
+	}
+}
+
+void RB_EndNamedEvent()
+{
+	// only do this if RBDOOM-3-BFG was started by RenderDoc or some similar tool
+	if( glConfig.gremedyStringMarkerAvailable && glConfig.khronosDebugAvailable )
+	{
+		glPopDebugGroup();
+	}
+}
+
+void RB_OpenMainBlockTimestamp( renderLogMainBlock_t block )
+{
+#if defined(__APPLE__)
+	// SRS - For OSX use elapsed time query for Apple OpenGL 4.1 using GL_TIME_ELAPSED vs GL_TIMESTAMP (which is not implemented on OSX)
+	// SRS - OSX AMD drivers have a rendering bug (flashing colours) with an elasped time query when Shadow Mapping is on - turn off query for that case unless r_skipAMDWorkarounds is set
+	if( !r_useShadowMapping.GetBool() || glConfig.vendor != VENDOR_AMD || r_skipAMDWorkarounds.GetBool() )
+	{
+		if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ] == 0 )
+		{
+			glGenQueries( 1, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ] );
+		}
+
+		glBeginQuery( GL_TIME_ELAPSED_EXT, glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ] );
+	}
+
+#else
+	if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 ] == 0 )
+	{
+		glCreateQueries( GL_TIMESTAMP, 2, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 ] );
+	}
+
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 0 ], GL_TIMESTAMP );
+	glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ block * 2 + 0 ]++;
+#endif
+}
+
+void RB_CloseMainBlockTimestamp( renderLogMainBlock_t block )
+{
+#if defined(__APPLE__)
+	// SRS - For OSX use elapsed time query for Apple OpenGL 4.1 using GL_TIME_ELAPSED vs GL_TIMESTAMP (which is not implemented on OSX)
+	// SRS - OSX AMD drivers have a rendering bug (flashing colours) with an elasped time query when Shadow Mapping is on - turn off query for that case unless r_skipAMDWorkarounds is set
+	if( !r_useShadowMapping.GetBool() || glConfig.vendor != VENDOR_AMD || r_skipAMDWorkarounds.GetBool() )
+	{
+		glEndQuery( GL_TIME_ELAPSED_EXT );
+		glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ block * 2 + 1 ]++;
+	}
+
+#else
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ], GL_TIMESTAMP );
+	glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ block * 2 + 1 ]++;
+#endif
+}
+
+void RB_ExecuteBackEndCommands( const emptyCommand_t* cmdHead )
+{
+// SRS - For OSX skip total rendering time query due to missing GL_TIMESTAMP support in Apple OpenGL 4.1, will calculate it inside SwapCommandBuffers_FinishRendering instead
+#if !defined(__APPLE__)
+if( glConfig.timerQueryAvailable )
+{
+	if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ MRB_GPU_TIME ] == 0 )
+	{
+		glCreateQueries( GL_TIMESTAMP, 2, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][MRB_GPU_TIME ] );
+	}
+
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ MRB_GPU_TIME * 2 + 0 ], GL_TIMESTAMP );
+	backEnd.ExecuteBackEndCommands( cmdHead );
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ MRB_GPU_TIME * 2 + 1 ], GL_TIMESTAMP );
+
+	glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ MRB_GPU_TIME * 2 + 1 ]++;
+
+	glFlush();
+}
+else
+#endif
+	{
+		backEnd.ExecuteBackEndCommands( cmdHead );
+	}
+}
+
+void RB_FinishRenderingGpuTiming( uint64* gpuMicroSec )
+{
+	// read back the start and end timer queries from the previous frame
+	if( glConfig.timerQueryAvailable )
+	{
+		GLuint64EXT gpuStartNanoseconds = 0;
+		GLuint64EXT gpuEndNanoseconds = 0;
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_GPU_TIME * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_GPU_TIME * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_GPU_TIME * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+
+			if( gpuMicroSec != NULL )
+			{
+				*gpuMicroSec = backEnd.pc.gpuMicroSec;
+			}
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_FILL_DEPTH_BUFFER  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FILL_DEPTH_BUFFER * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FILL_DEPTH_BUFFER * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuDepthMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_SSAO_PASS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_SSAO_PASS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_SSAO_PASS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuScreenSpaceAmbientOcclusionMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_AMBIENT_PASS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_AMBIENT_PASS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_AMBIENT_PASS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuAmbientPassMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_INTERACTIONS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_INTERACTIONS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_INTERACTIONS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuInteractionsMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuShaderPassMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_POSTPROCESS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_POSTPROCESS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_POSTPROCESS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuPostProcessingMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+// SRS - For OSX OpenGL calculate total rendering time vs direct measurement due to missing GL_TIMESTAMP support in Apple OpenGL 4.1
+#if defined(__APPLE__)
+		// SRS - On OSX gpuMicroSec starts with only a portion of the GPU rendering time, must add additional components for more accurate estimate
+		backEnd.pc.gpuMicroSec += backEnd.pc.gpuDepthMicroSec + backEnd.pc.gpuScreenSpaceAmbientOcclusionMicroSec + backEnd.pc.gpuScreenSpaceReflectionsMicroSec + backEnd.pc.gpuAmbientPassMicroSec + backEnd.pc.gpuInteractionsMicroSec + backEnd.pc.gpuShaderPassMicroSec + backEnd.pc.gpuPostProcessingMicroSec;
+
+		// SRS - For OSX elapsed time queries, no need to perform unnecessary calls to glGetQueryObjectui64vEXT since gpuStartNanoseconds will always equal 0
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_FILL_GEOMETRY_BUFFER  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FILL_GEOMETRY_BUFFER * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_FOG_ALL_LIGHTS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FOG_ALL_LIGHTS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES_POST  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES_POST * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_DEBUG_TOOLS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_DEBUG_TOOLS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_GUI  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_GUI * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( gpuMicroSec != NULL )
+		{
+			*gpuMicroSec = backEnd.pc.gpuMicroSec;
+		}
+#endif
+
+		for( int i = 0; i < MRB_TOTAL_QUERIES; i++ )
+		{
+			glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ i ] = 0;
+		}
+	}
+}
+
+void RB_CaptureRenderToFile( const char* fileName, const idScreenRect& rc )
+{
+
+	glReadBuffer( GL_BACK );
+
+	// include extra space for OpenGL padding to word boundaries
+	int	c = ( rc.GetWidth() + 3 ) * rc.GetHeight();
+	byte* data = ( byte* )R_StaticAlloc( c * 3 );
+
+	glReadPixels( rc.x1, rc.y1, rc.GetWidth(), rc.GetHeight(), GL_RGB, GL_UNSIGNED_BYTE, data );
+
+	byte* data2 = ( byte* )R_StaticAlloc( c * 4 );
+
+	for( int i = 0 ; i < c ; i++ )
+	{
+		data2[ i * 4 ] = data[ i * 3 ];
+		data2[ i * 4 + 1 ] = data[ i * 3 + 1 ];
+		data2[ i * 4 + 2 ] = data[ i * 3 + 2 ];
+		data2[ i * 4 + 3 ] = 0xff;
+	}
+
+	R_WriteTGA( fileName, data2, rc.GetWidth(), rc.GetHeight(), true );
+
+	R_StaticFree( data );
+	R_StaticFree( data2 );
+}
+
+void RB_ReadTiledPixels( int width, int height, byte* buffer, renderView_t* ref, int sysWidth, int sysHeight )
+{
+
+	// include extra space for OpenGL padding to word boundaries
+
+	byte* temp = NULL;
+	if( ref && ref->rdflags & RDF_IRRADIANCE )
+	{
+		// * 2 = sizeof( half float )
+		//temp = ( byte* )R_StaticAlloc( ENVPROBE_CAPTURE_SIZE * ENVPROBE_CAPTURE_SIZE * 3 * 2 );
+	}
+	else
+	{
+		temp = ( byte* )R_StaticAlloc( ( sysWidth + 3 ) * sysHeight * 3 );
+	}
+
+	// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#ifdef BUGFIXEDSCREENSHOTRESOLUTION
+	if( sysWidth > width )
+	{
+		sysWidth = width;
+	}
+
+	if( sysHeight > height )
+	{
+		sysHeight = height;
+	}
+
+	// make sure the game / draw thread has completed
+	commonLocal.WaitGameThread();
+
+	// discard anything currently on the list
+	tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+
+	int originalNativeWidth = glConfig.nativeScreenWidth;
+	int originalNativeHeight = glConfig.nativeScreenHeight;
+
+	//if( !ref || ( ref && !( ref->rdflags & RDF_IRRADIANCE ) ) )
+	{
+		glConfig.nativeScreenWidth = sysWidth;
+		glConfig.nativeScreenHeight = sysHeight;
+	}
+#endif
+
+	// disable scissor, so we don't need to adjust all those rects
+	r_useScissor.SetBool( false );
+
+	for( int xo = 0 ; xo < width ; xo += sysWidth )
+	{
+		for( int yo = 0 ; yo < height ; yo += sysHeight )
+		{
+			// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#ifdef BUGFIXEDSCREENSHOTRESOLUTION
+			// discard anything currently on the list
+			tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+			if( ref )
+			{
+				// ref is only used by envShot, Event_camShot, etc to grab screenshots of things in the world,
+				// so this omits the hud and other effects
+				tr.primaryWorld->RenderScene( ref );
+			}
+			else
+			{
+				// build all the draw commands without running a new game tic
+				commonLocal.Draw();
+			}
+			// this should exit right after vsync, with the GPU idle and ready to draw
+			const emptyCommand_t* cmd = tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+
+			// get the GPU busy with new commands
+			tr.RenderCommandBuffers( cmd );
+
+			// discard anything currently on the list (this triggers SwapBuffers)
+			tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+#else
+			// foresthale 2014-03-01: note: ref is always NULL in every call path to this function
+			if( ref )
+			{
+				// discard anything currently on the list
+				tr.SwapCommandBuffers( NULL, NULL, NULL, NULL );
+
+				// build commands to render the scene
+				tr.primaryWorld->RenderScene( ref );
+
+				// finish off these commands
+				const emptyCommand_t* cmd = tr.SwapCommandBuffers( NULL, NULL, NULL, NULL );
+
+				// issue the commands to the GPU
+				tr.RenderCommandBuffers( cmd );
+			}
+			else
+			{
+				const bool captureToImage = false;
+				common->UpdateScreen( captureToImage, false );
+			}
+#endif
+
+			int w = sysWidth;
+			if( xo + w > width )
+			{
+				w = width - xo;
+			}
+			int h = sysHeight;
+			if( yo + h > height )
+			{
+				h = height - yo;
+			}
+
+			if( ref && ref->rdflags & RDF_IRRADIANCE )
+			{
+				globalFramebuffers.envprobeFBO->Bind();
+
+				glPixelStorei( GL_PACK_ROW_LENGTH, ENVPROBE_CAPTURE_SIZE );
+				glReadPixels( 0, 0, w, h, GL_RGB, GL_HALF_FLOAT, buffer );
+
+				R_VerticalFlipRGB16F( buffer, w, h );
+
+				Framebuffer::Unbind();
+			}
+			else
+			{
+				glReadBuffer( GL_FRONT );
+				glReadPixels( 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, temp );
+
+				int	row = ( w * 3 + 3 ) & ~3;		// OpenGL pads to dword boundaries
+
+				for( int y = 0 ; y < h ; y++ )
+				{
+					memcpy( buffer + ( ( yo + y )* width + xo ) * 3,
+							temp + y * row, w * 3 );
+				}
+			}
+		}
+	}
+
+	// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#ifdef BUGFIXEDSCREENSHOTRESOLUTION
+	// discard anything currently on the list
+	tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+
+	if( !ref || ( ref && !( ref->rdflags & RDF_IRRADIANCE ) ) )
+	{
+		glConfig.nativeScreenWidth = originalNativeWidth;
+		glConfig.nativeScreenHeight = originalNativeHeight;
+	}
+#endif
+
+	r_useScissor.SetBool( true );
+
+	R_StaticFree( temp );
+}
+
+const int BACK_BUFFER_TARGET = ( int )GL_BACK;
