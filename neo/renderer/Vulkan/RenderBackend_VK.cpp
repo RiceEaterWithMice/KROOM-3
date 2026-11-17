@@ -2770,3 +2770,54 @@ const int INTERACTION_TEXUNIT_AMBIENT_CUBE1 = 5;
 const int INTERACTION_TEXUNIT_SPECULAR_CUBE1 = 6;
 const int INTERACTION_TEXUNIT_SPECULAR_CUBE2 = 7;
 const int INTERACTION_TEXUNIT_SPECULAR_CUBE3 = 8;
+
+// stubs for the GL-only hooks, the Vulkan backend does not use them
+
+void GL_BindShadowMapFBO( int shadowLOD, int side )
+{
+	( void )shadowLOD;
+	( void )side;
+}
+
+void GL_ReadHDR64Pixels( float* image )
+{
+	memset( image, 0, 64 * 64 * 4 * sizeof( float ) );
+}
+
+void GL_SetClearColor( float r, float g, float b, float a )
+{
+	( void )r;
+	( void )g;
+	( void )b;
+	( void )a;
+}
+
+void GL_ClearColorBuffer()
+{
+}
+
+void GL_BindGlobalVAO()
+{
+}
+
+void idRenderBackend::HDRPostProcess( const viewDef_t* _viewDef, bool useHDR )
+{
+	( void )_viewDef;
+	( void )useHDR;
+}
+
+void idRenderBackend::DrawPostProcess( const void* data )
+{
+	( void )data;
+}
+
+void idRenderBackend::DrawScreenSpaceAmbientOcclusionGL( const viewDef_t* _viewDef, bool downModulateScreen )
+{
+	( void )_viewDef;
+	( void )downModulateScreen;
+}
+
+void idRenderBackend::DrawScreenSpaceGlobalIlluminationGL( const viewDef_t* _viewDef )
+{
+	( void )_viewDef;
+}

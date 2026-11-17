@@ -42,6 +42,13 @@ extern const int INTERACTION_TEXUNIT_AMBIENT_CUBE1;
 extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE1;
 extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE2;
 extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE3;
+
+// backend hooks for raw API calls in shared backend code
+void GL_BindShadowMapFBO( int shadowLOD, int side );
+void GL_ReadHDR64Pixels( float* image );
+void GL_SetClearColor( float r, float g, float b, float a );
+void GL_ClearColorBuffer();
+void GL_BindGlobalVAO();
 #if 1 // !defined(RETAIL)
 	#define         GL_CheckErrors()	GL_CheckErrors_(__FILE__, __LINE__)
 #else
@@ -350,6 +357,10 @@ private:
 	// Experimental feature
 	void				MotionBlur();
 	void				PostProcess( const void* data );
+	void				HDRPostProcess( const viewDef_t* _viewDef, bool useHDR );
+	void				DrawPostProcess( const void* data );
+	void				DrawScreenSpaceAmbientOcclusionGL( const viewDef_t* _viewDef, bool downModulateScreen );
+	void				DrawScreenSpaceGlobalIlluminationGL( const viewDef_t* _viewDef );
 
 	void				SetBuffer( const void* data );
 
