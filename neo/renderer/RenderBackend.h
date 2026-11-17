@@ -392,7 +392,7 @@ private:
 	// RB end
 
 private:
-
+	int					currenttmu;
 	unsigned int		currentVertexBuffer;
 	unsigned int		currentIndexBuffer;
 	Framebuffer*		currentFramebuffer;		// RB: for offscreen rendering
