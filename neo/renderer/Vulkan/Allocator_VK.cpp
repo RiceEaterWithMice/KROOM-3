@@ -32,6 +32,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "../RenderCommon.h"
 #include "../RenderBackend.h"
+#include "VulkanContext.h"
 #include "Allocator_VK.h"
 
 idCVar r_vkDeviceLocalMemoryMB( "r_vkDeviceLocalMemoryMB", "256", CVAR_INTEGER | CVAR_INIT, "" );

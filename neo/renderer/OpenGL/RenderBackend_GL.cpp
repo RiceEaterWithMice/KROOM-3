@@ -453,8 +453,8 @@ static void R_CheckPortableExtensions()
 	}
 
 	// generate one global Vertex Array Object (VAO)
-	glGenVertexArrays( 1, &glConfig.global_vao );
-	glBindVertexArray( glConfig.global_vao );
+	glGenVertexArrays( 1, &glcontext.global_vao );
+	glBindVertexArray( glcontext.global_vao );
 }
 // RB end
 
@@ -665,7 +665,7 @@ void idRenderBackend::DrawElementsWithCounters( const drawSurf_t* surf )
 		assert( ( jointBuffer.GetOffset() & ( glConfig.uniformBufferOffsetAlignment - 1 ) ) == 0 );
 
 		// RB: 64 bit fixes, changed GLuint to GLintptr
-		const GLintptr ubo = jointBuffer.GetAPIObject();
+		const GLintptr ubo = ( GLintptr )jointBuffer.GetAPIObject();
 		// RB end
 
 		glBindBufferRange( GL_UNIFORM_BUFFER, 0, ubo, jointBuffer.GetOffset(), jointBuffer.GetSize() );
@@ -1734,3 +1734,1251 @@ void idRenderBackend::ImGui_RenderDrawLists( ImDrawData* draw_data )
 {
 	tr.guiModel->EmitImGui( draw_data );
 }
+
+// GL texture unit assignments for interaction rendering
+const int INTERACTION_TEXUNIT_AMBIENT_CUBE1 = 7;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE1 = 8;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE2 = 9;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE3 = 10;
+
+// backend hooks extracted from the shared backend code
+
+void GL_BindShadowMapFBO( int shadowLOD, int side )
+{
+	globalFramebuffers.shadowFBO[shadowLOD]->Bind();
+
+	if( side < 0 )
+	{
+		globalFramebuffers.shadowFBO[shadowLOD]->AttachImageDepthLayer( globalImages->shadowImage[shadowLOD], 0 );
+	}
+	else
+	{
+		globalFramebuffers.shadowFBO[shadowLOD]->AttachImageDepthLayer( globalImages->shadowImage[shadowLOD], side );
+	}
+
+	globalFramebuffers.shadowFBO[shadowLOD]->Check();
+
+	GL_ViewportAndScissor( 0, 0, shadowMapResolutions[shadowLOD], shadowMapResolutions[shadowLOD] );
+
+	glClear( GL_DEPTH_BUFFER_BIT );
+}
+
+void GL_ReadHDR64Pixels( float* image )
+{
+	glReadPixels( 0, 0, 64, 64, GL_RGBA, GL_FLOAT, image );
+}
+
+void GL_SetClearColor( float r, float g, float b, float a )
+{
+	glClearColor( r, g, b, a );
+}
+
+void GL_ClearColorBuffer()
+{
+	glClear( GL_COLOR_BUFFER_BIT );
+}
+
+void GL_BindGlobalVAO()
+{
+	glBindVertexArray( glcontext.global_vao );
+}
+
+void idRenderBackend::HDRPostProcess( const viewDef_t* _viewDef, bool useHDR )
+{
+
+// SRS - For OSX OpenGL record the final portion of GPU time while no other elapsed time query is active (after final shader pass and before post processing)
+#if defined(__APPLE__)
+	renderLog.OpenMainBlock( MRB_GPU_TIME );
+#endif
+
+	// RB: convert back from HDR to LDR range
+	if( useHDR && !( _viewDef->renderView.rdflags & RDF_IRRADIANCE ) )
+	{
+		/*
+		int x = backEnd.viewDef->viewport.x1;
+		int y = backEnd.viewDef->viewport.y1;
+		int	w = backEnd.viewDef->viewport.x2 - backEnd.viewDef->viewport.x1 + 1;
+		int	h = backEnd.viewDef->viewport.y2 - backEnd.viewDef->viewport.y1 + 1;
+
+		GL_Viewport( viewDef->viewport.x1,
+				viewDef->viewport.y1,
+				viewDef->viewport.x2 + 1 - viewDef->viewport.x1,
+				viewDef->viewport.y2 + 1 - viewDef->viewport.y1 );
+		*/
+
+		/*
+		glBindFramebuffer( GL_READ_FRAMEBUFFER, globalFramebuffers.hdrFBO->GetFramebuffer() );
+		glBindFramebuffer( GL_DRAW_FRAMEBUFFER, globalFramebuffers.hdrQuarterFBO->GetFramebuffer() );
+		glBlitFramebuffer( 0, 0, renderSystem->GetWidth(), renderSystem->GetHeight(),
+						   0, 0, renderSystem->GetWidth() * 0.25f, renderSystem->GetHeight() * 0.25f,
+						   GL_COLOR_BUFFER_BIT,
+						   GL_LINEAR );
+		*/
+
+#if defined(USE_HDR_MSAA)
+		if( glConfig.multisamples > 0 )
+		{
+			glBindFramebuffer( GL_READ_FRAMEBUFFER, globalFramebuffers.hdrFBO->GetFramebuffer() );
+			glBindFramebuffer( GL_DRAW_FRAMEBUFFER, globalFramebuffers.hdrNonMSAAFBO->GetFramebuffer() );
+			glBlitFramebuffer( 0, 0, renderSystem->GetWidth(), renderSystem->GetHeight(),
+							   0, 0, renderSystem->GetWidth(), renderSystem->GetHeight(),
+							   GL_COLOR_BUFFER_BIT,
+							   GL_LINEAR );
+
+			// TODO resolve to 1x1
+			glBindFramebuffer( GL_READ_FRAMEBUFFER_EXT, globalFramebuffers.hdrNonMSAAFBO->GetFramebuffer() );
+			glBindFramebuffer( GL_DRAW_FRAMEBUFFER_EXT, globalFramebuffers.hdr64FBO->GetFramebuffer() );
+			glBlitFramebuffer( 0, 0, renderSystem->GetWidth(), renderSystem->GetHeight(),
+							   0, 0, 64, 64,
+							   GL_COLOR_BUFFER_BIT,
+							   GL_LINEAR );
+		}
+		else
+#endif
+		{
+			glBindFramebuffer( GL_READ_FRAMEBUFFER_EXT, globalFramebuffers.hdrFBO->GetFramebuffer() );
+			glBindFramebuffer( GL_DRAW_FRAMEBUFFER_EXT, globalFramebuffers.hdr64FBO->GetFramebuffer() );
+			glBlitFramebuffer( 0, 0, renderSystem->GetWidth(), renderSystem->GetHeight(),
+							   0, 0, 64, 64,
+							   GL_COLOR_BUFFER_BIT,
+							   GL_LINEAR );
+		}
+
+		CalculateAutomaticExposure();
+
+		Tonemap( _viewDef );
+	}
+
+	if( !r_skipBloom.GetBool() )
+	{
+		Bloom( _viewDef );
+	}
+
+#if defined(__APPLE__)
+	renderLog.CloseMainBlock();
+#endif
+
+}
+
+void idRenderBackend::DrawPostProcess( const void* data )
+{
+
+	// resolve the scaled rendering to a temporary texture
+	postProcessCommand_t* cmd = ( postProcessCommand_t* )data;
+	const idScreenRect& viewport = cmd->viewDef->viewport;
+
+	GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS |  GLS_CULL_TWOSIDED );
+
+	int screenWidth = renderSystem->GetWidth();
+	int screenHeight = renderSystem->GetHeight();
+
+	// set the window clipping
+	GL_Viewport( 0, 0, screenWidth, screenHeight );
+	GL_Scissor( 0, 0, screenWidth, screenHeight );
+
+	// SMAA
+	int aaMode = r_antiAliasing.GetInteger();
+	if( aaMode == ANTI_ALIASING_SMAA_1X )
+	{
+		/*
+		 * The shader has three passes, chained together as follows:
+		 *
+		 *                           |input|------------------�
+		 *                              v                     |
+		 *                    [ SMAA*EdgeDetection ]          |
+		 *                              v                     |
+		 *                          |edgesTex|                |
+		 *                              v                     |
+		 *              [ SMAABlendingWeightCalculation ]     |
+		 *                              v                     |
+		 *                          |blendTex|                |
+		 *                              v                     |
+		 *                [ SMAANeighborhoodBlending ] <------�
+		 *                              v
+		 *                           |output|
+		*/
+
+		globalImages->smaaInputImage->CopyFramebuffer( 0, 0, screenWidth, screenHeight );
+
+		// set SMAA_RT_METRICS = rpScreenCorrectionFactor
+		float screenCorrectionParm[4];
+		screenCorrectionParm[0] = 1.0f / screenWidth;
+		screenCorrectionParm[1] = 1.0f / screenHeight;
+		screenCorrectionParm[2] = screenWidth;
+		screenCorrectionParm[3] = screenHeight;
+		SetFragmentParm( RENDERPARM_SCREENCORRECTIONFACTOR, screenCorrectionParm ); // rpScreenCorrectionFactor
+
+		globalFramebuffers.smaaEdgesFBO->Bind();
+
+		glClearColor( 0, 0, 0, 0 );
+		glClear( GL_COLOR_BUFFER_BIT );
+
+		GL_SelectTexture( 0 );
+		globalImages->smaaInputImage->Bind();
+
+		renderProgManager.BindShader_SMAA_EdgeDetection();
+		DrawElementsWithCounters( &unitSquareSurface );
+
+#if 1
+		//globalImages->smaaEdgesImage->CopyFramebuffer( viewport.x1, viewport.y1, viewport.GetWidth(), viewport.GetHeight() );
+
+		globalFramebuffers.smaaBlendFBO->Bind();
+		//Framebuffer::Unbind();
+
+		glClear( GL_COLOR_BUFFER_BIT );
+
+		GL_SelectTexture( 0 );
+		globalImages->smaaEdgesImage->Bind();
+
+		GL_SelectTexture( 1 );
+		globalImages->smaaAreaImage->Bind();
+
+		GL_SelectTexture( 2 );
+		globalImages->smaaSearchImage->Bind();
+
+		renderProgManager.BindShader_SMAA_BlendingWeightCalculation();
+		DrawElementsWithCounters( &unitSquareSurface );
+
+		Framebuffer::Unbind();
+#endif
+
+#if 1
+		//GL_SelectTexture( 0 );
+		//globalImages->smaaBlendImage->CopyFramebuffer( viewport.x1, viewport.y1, viewport.GetWidth(), viewport.GetHeight() );
+
+		GL_SelectTexture( 0 );
+		globalImages->smaaInputImage->Bind();
+
+		GL_SelectTexture( 1 );
+		globalImages->smaaBlendImage->Bind();
+
+		renderProgManager.BindShader_SMAA_NeighborhoodBlending();
+		DrawElementsWithCounters( &unitSquareSurface );
+#endif
+	}
+
+	if( r_useFilmicPostProcessing.GetBool() )
+	{
+		globalImages->currentRenderImage->CopyFramebuffer( viewport.x1, viewport.y1, viewport.GetWidth(), viewport.GetHeight() );
+
+		GL_SelectTexture( 0 );
+		globalImages->currentRenderImage->Bind();
+
+		GL_SelectTexture( 1 );
+		globalImages->blueNoiseImage256->Bind();
+
+		renderProgManager.BindShader_PostProcess();
+
+		float jitterTexOffset[4];
+		jitterTexOffset[0] = 1.0f / globalImages->blueNoiseImage256->GetUploadWidth();
+		jitterTexOffset[1] = 1.0f / globalImages->blueNoiseImage256->GetUploadHeight();
+
+		if( r_shadowMapRandomizeJitter.GetBool() )
+		{
+			jitterTexOffset[2] = Sys_Milliseconds() / 1000.0f;
+			jitterTexOffset[3] = tr.frameCount % 256;
+		}
+		else
+		{
+			jitterTexOffset[2] = 0.0f;
+			jitterTexOffset[3] = 0.0f;
+		}
+
+		SetFragmentParm( RENDERPARM_JITTERTEXOFFSET, jitterTexOffset ); // rpJitterTexOffset
+
+		// Draw
+		DrawElementsWithCounters( &unitSquareSurface );
+	}
+
+	GL_SelectTexture( 0 );
+	renderProgManager.Unbind();
+
+}
+
+void idRenderBackend::DrawScreenSpaceAmbientOcclusionGL( const viewDef_t* _viewDef, bool downModulateScreen )
+{
+	if( !_viewDef->viewEntitys || _viewDef->is2Dgui )
+	{
+		// 3D views only
+		return;
+	}
+
+	if( r_useSSAO.GetInteger() <= 0 )
+	{
+		return;
+	}
+
+	// skip this in subviews because it is very expensive
+	if( _viewDef->isSubview )
+	{
+		return;
+	}
+
+	if( _viewDef->renderView.rdflags & ( RDF_NOAMBIENT | RDF_IRRADIANCE ) )
+	{
+		return;
+	}
+
+	renderLog.OpenMainBlock( MRB_SSAO_PASS );
+	renderLog.OpenBlock( "Render_SSAO", colorBlue );
+
+	currentSpace = &viewDef->worldSpace;
+	RB_SetMVP( viewDef->worldSpace.mvp );
+
+	Framebuffer* previousFramebuffer = Framebuffer::GetActiveFramebuffer();
+
+	int screenWidth = renderSystem->GetWidth();
+	int screenHeight = renderSystem->GetHeight();
+
+	// build hierarchical depth buffer
+	if( r_useHierarchicalDepthBuffer.GetBool() )
+	{
+		renderLog.OpenBlock( "Render_HiZ", colorDkGrey );
+
+		renderProgManager.BindShader_AmbientOcclusionMinify();
+
+		GL_Color( 0, 0, 0, 1 );
+
+		GL_SelectTexture( 0 );
+		//globalImages->currentDepthImage->Bind();
+
+		for( int i = 0; i < MAX_HIERARCHICAL_ZBUFFERS; i++ )
+		{
+			int width = globalFramebuffers.csDepthFBO[i]->GetWidth();
+			int height = globalFramebuffers.csDepthFBO[i]->GetHeight();
+
+			globalFramebuffers.csDepthFBO[i]->Bind();
+
+			GL_Viewport( 0, 0, width, height );
+			GL_Scissor( 0, 0, width, height );
+
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS | GLS_CULL_TWOSIDED );
+
+			glClear( GL_COLOR_BUFFER_BIT );
+
+			if( i == 0 )
+			{
+				renderProgManager.BindShader_AmbientOcclusionReconstructCSZ();
+
+				globalImages->currentDepthImage->Bind();
+			}
+			else
+			{
+				renderProgManager.BindShader_AmbientOcclusionMinify();
+
+				GL_SelectTexture( 0 );
+				globalImages->hierarchicalZbufferImage->Bind();
+			}
+
+			float jitterTexScale[4];
+			jitterTexScale[0] = i - 1;
+			jitterTexScale[1] = 0;
+			jitterTexScale[2] = 0;
+			jitterTexScale[3] = 0;
+			SetFragmentParm( RENDERPARM_JITTERTEXSCALE, jitterTexScale ); // rpJitterTexScale
+
+			float screenCorrectionParm[4];
+			screenCorrectionParm[0] = 1.0f / width;
+			screenCorrectionParm[1] = 1.0f / height;
+			screenCorrectionParm[2] = width;
+			screenCorrectionParm[3] = height;
+			SetFragmentParm( RENDERPARM_SCREENCORRECTIONFACTOR, screenCorrectionParm ); // rpScreenCorrectionFactor
+
+			DrawElementsWithCounters( &unitSquareSurface );
+		}
+
+		renderLog.CloseBlock();
+	}
+
+	// set the window clipping
+	int aoScreenWidth = globalFramebuffers.ambientOcclusionFBO[0]->GetWidth();
+	int aoScreenHeight = globalFramebuffers.ambientOcclusionFBO[0]->GetHeight();
+
+	GL_Viewport( 0, 0, aoScreenWidth, aoScreenHeight );
+	GL_Scissor( 0, 0, aoScreenWidth, aoScreenHeight );
+
+
+
+	if( downModulateScreen )
+	{
+		if( r_ssaoFiltering.GetBool() )
+		{
+			globalFramebuffers.ambientOcclusionFBO[0]->Bind();
+
+			glClearColor( 0, 0, 0, 0 );
+			glClear( GL_COLOR_BUFFER_BIT );
+
+			renderProgManager.BindShader_AmbientOcclusion();
+		}
+		else
+		{
+			if( r_ssaoDebug.GetInteger() <= 0 )
+			{
+				GL_State( GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO | GLS_ALPHAMASK | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS );
+			}
+
+			if( previousFramebuffer != NULL )
+			{
+				previousFramebuffer->Bind();
+			}
+			else
+			{
+				Framebuffer::Unbind();
+			}
+
+			renderProgManager.BindShader_AmbientOcclusionAndOutput();
+		}
+	}
+	else
+	{
+		globalFramebuffers.ambientOcclusionFBO[0]->Bind();
+
+		GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS | GLS_CULL_TWOSIDED );
+
+		glClearColor( 0, 0, 0, 0 );
+		glClear( GL_COLOR_BUFFER_BIT );
+
+		if( r_ssaoFiltering.GetBool() )
+		{
+			renderProgManager.BindShader_AmbientOcclusion();
+		}
+		else
+		{
+			renderProgManager.BindShader_AmbientOcclusionAndOutput();
+		}
+	}
+
+	float screenCorrectionParm[4];
+	screenCorrectionParm[0] = float( screenWidth ) / aoScreenWidth;
+	screenCorrectionParm[1] = float( screenHeight ) / aoScreenHeight;
+	screenCorrectionParm[2] = 0.0f;
+	screenCorrectionParm[3] = 1.0f;
+	SetFragmentParm( RENDERPARM_SCREENCORRECTIONFACTOR, screenCorrectionParm ); // rpScreenCorrectionFactor
+
+	// window coord to 0.0 to 1.0 conversion
+	float windowCoordParm[4];
+	windowCoordParm[0] = 1.0f / aoScreenWidth;
+	windowCoordParm[1] = 1.0f / aoScreenHeight;
+	windowCoordParm[2] = aoScreenWidth;
+	windowCoordParm[3] = aoScreenHeight;
+	SetFragmentParm( RENDERPARM_WINDOWCOORD, windowCoordParm ); // rpWindowCoord
+
+#if 0
+	// RB: set unprojection matrices so we can convert zbuffer values back to camera and world spaces
+	idRenderMatrix modelViewMatrix;
+	idRenderMatrix::Transpose( *( idRenderMatrix* )backEnd.viewDef->worldSpace.modelViewMatrix, modelViewMatrix );
+	idRenderMatrix cameraToWorldMatrix;
+	if( !idRenderMatrix::Inverse( modelViewMatrix, cameraToWorldMatrix ) )
+	{
+		idLib::Warning( "cameraToWorldMatrix invert failed" );
+	}
+
+	SetVertexParms( RENDERPARM_MODELMATRIX_X, cameraToWorldMatrix[0], 4 );
+	//SetVertexParms( RENDERPARM_MODELMATRIX_X, viewDef->unprojectionToWorldRenderMatrix[0], 4 );
+#endif
+	SetVertexParms( RENDERPARM_MODELMATRIX_X, viewDef->unprojectionToCameraRenderMatrix[0], 4 );
+
+	const float jitterSampleScale = 1.0f;
+
+	float jitterTexScale[4];
+	jitterTexScale[0] = r_shadowMapJitterScale.GetFloat() * jitterSampleScale;	// TODO shadow buffer size fraction shadowMapSize / maxShadowMapSize
+	jitterTexScale[1] = r_shadowMapJitterScale.GetFloat() * jitterSampleScale;
+	jitterTexScale[2] = -r_shadowMapBiasScale.GetFloat();
+	jitterTexScale[3] = 0.0f;
+	SetFragmentParm( RENDERPARM_JITTERTEXSCALE, jitterTexScale ); // rpJitterTexScale
+
+	float jitterTexOffset[4];
+	jitterTexOffset[0] = 1.0f / globalImages->blueNoiseImage256->GetUploadWidth();
+	jitterTexOffset[1] = 1.0f / globalImages->blueNoiseImage256->GetUploadHeight();
+
+	if( r_shadowMapRandomizeJitter.GetBool() )
+	{
+		jitterTexOffset[2] = Sys_Milliseconds() / 1000.0f;
+		jitterTexOffset[3] = tr.frameCount % 256;
+	}
+	else
+	{
+		jitterTexOffset[2] = 0.0f;
+		jitterTexOffset[3] = 0.0f;
+	}
+
+	SetFragmentParm( RENDERPARM_JITTERTEXOFFSET, jitterTexOffset ); // rpJitterTexOffset
+
+	GL_SelectTexture( 0 );
+	globalImages->currentNormalsImage->Bind();
+
+	GL_SelectTexture( 1 );
+	if( r_useHierarchicalDepthBuffer.GetBool() )
+	{
+		globalImages->hierarchicalZbufferImage->Bind();
+	}
+	else
+	{
+		globalImages->currentDepthImage->Bind();
+	}
+
+	GL_SelectTexture( 2 );
+	globalImages->blueNoiseImage256->Bind();
+
+	DrawElementsWithCounters( &unitSquareSurface );
+
+	if( r_ssaoFiltering.GetBool() )
+	{
+		float jitterTexScale[4];
+
+		// AO blur X
+		globalFramebuffers.ambientOcclusionFBO[1]->Bind();
+
+		renderProgManager.BindShader_AmbientOcclusionBlur();
+
+		// set axis parameter
+		jitterTexScale[0] = 1;
+		jitterTexScale[1] = 0;
+		jitterTexScale[2] = 0;
+		jitterTexScale[3] = 0;
+		SetFragmentParm( RENDERPARM_JITTERTEXSCALE, jitterTexScale ); // rpJitterTexScale
+
+		GL_SelectTexture( 2 );
+		globalImages->ambientOcclusionImage[0]->Bind();
+
+		DrawElementsWithCounters( &unitSquareSurface );
+
+		// AO blur Y
+		if( downModulateScreen )
+		{
+			if( previousFramebuffer != NULL )
+			{
+				previousFramebuffer->Bind();
+			}
+			else
+			{
+				Framebuffer::Unbind();
+			}
+
+			if( r_ssaoDebug.GetInteger() <= 0 )
+			{
+				GL_State( GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS );
+			}
+		}
+		else
+		{
+			globalFramebuffers.ambientOcclusionFBO[0]->Bind();
+		}
+
+		renderProgManager.BindShader_AmbientOcclusionBlurAndOutput();
+
+		// set axis parameter
+		jitterTexScale[0] = 0;
+		jitterTexScale[1] = 1;
+		jitterTexScale[2] = 0;
+		jitterTexScale[3] = 0;
+		SetFragmentParm( RENDERPARM_JITTERTEXSCALE, jitterTexScale ); // rpJitterTexScale
+
+		GL_SelectTexture( 2 );
+		globalImages->ambientOcclusionImage[1]->Bind();
+
+		DrawElementsWithCounters( &unitSquareSurface );
+	}
+
+	if( !downModulateScreen )
+	{
+		// go back to main scene render target
+		if( previousFramebuffer != NULL )
+		{
+			previousFramebuffer->Bind();
+		}
+		else
+		{
+			Framebuffer::Unbind();
+		}
+	}
+
+	//
+	// reset state
+	//
+	renderProgManager.Unbind();
+
+	GL_Viewport( 0, 0, screenWidth, screenHeight );
+	GL_Scissor( 0, 0, screenWidth, screenHeight );
+
+	GL_State( GLS_DEFAULT );
+
+	renderLog.CloseBlock();
+	renderLog.CloseMainBlock();
+
+	//GL_CheckErrors();
+}
+
+void idRenderBackend::DrawScreenSpaceGlobalIlluminationGL( const viewDef_t* _viewDef )
+{
+	if( !_viewDef->viewEntitys || _viewDef->is2Dgui )
+	{
+		// 3D views only
+		return;
+	}
+
+	if( r_useSSGI.GetInteger() <= 0 )
+	{
+		return;
+	}
+
+	// FIXME very expensive to enable this in subviews
+	if( _viewDef->isSubview )
+	{
+		return;
+	}
+
+	if( _viewDef->renderView.rdflags & ( RDF_NOAMBIENT | RDF_IRRADIANCE ) )
+	{
+		return;
+	}
+
+	RENDERLOG_PRINTF( "---------- RB_SSGI() ----------\n" );
+
+	currentSpace = &viewDef->worldSpace;
+	RB_SetMVP( viewDef->worldSpace.mvp );
+
+	Framebuffer* previousFramebuffer = Framebuffer::GetActiveFramebuffer();
+
+	int screenWidth = renderSystem->GetWidth();
+	int screenHeight = renderSystem->GetHeight();
+
+	// set the window clipping
+	GL_Viewport( 0, 0, screenWidth, screenHeight );
+	GL_Scissor( 0, 0, screenWidth, screenHeight );
+
+	// TODO remove
+	if( previousFramebuffer == NULL )
+	{
+		const idScreenRect& viewport = viewDef->viewport;
+		globalImages->currentRenderImage->CopyFramebuffer( viewport.x1, viewport.y1, viewport.GetWidth(), viewport.GetHeight() );
+	}
+
+	// build hierarchical depth buffer
+	if( r_useHierarchicalDepthBuffer.GetBool() )
+	{
+		renderProgManager.BindShader_AmbientOcclusionMinify();
+
+		glClearColor( 0, 0, 0, 1 );
+
+		GL_SelectTexture( 0 );
+		//globalImages->currentDepthImage->Bind();
+
+		for( int i = 0; i < MAX_HIERARCHICAL_ZBUFFERS; i++ )
+		{
+			int width = globalFramebuffers.csDepthFBO[i]->GetWidth();
+			int height = globalFramebuffers.csDepthFBO[i]->GetHeight();
+
+			GL_Viewport( 0, 0, width, height );
+			GL_Scissor( 0, 0, width, height );
+
+			globalFramebuffers.csDepthFBO[i]->Bind();
+
+			glClear( GL_COLOR_BUFFER_BIT );
+
+			if( i == 0 )
+			{
+				renderProgManager.BindShader_AmbientOcclusionReconstructCSZ();
+
+				globalImages->currentDepthImage->Bind();
+			}
+			else
+			{
+				renderProgManager.BindShader_AmbientOcclusionMinify();
+
+				GL_SelectTexture( 0 );
+				globalImages->hierarchicalZbufferImage->Bind();
+			}
+
+			float jitterTexScale[4];
+			jitterTexScale[0] = i - 1;
+			jitterTexScale[1] = 0;
+			jitterTexScale[2] = 0;
+			jitterTexScale[3] = 0;
+			SetFragmentParm( RENDERPARM_JITTERTEXSCALE, jitterTexScale ); // rpJitterTexScale
+#if 1
+			float screenCorrectionParm[4];
+			screenCorrectionParm[0] = 1.0f / width;
+			screenCorrectionParm[1] = 1.0f / height;
+			screenCorrectionParm[2] = width;
+			screenCorrectionParm[3] = height;
+			SetFragmentParm( RENDERPARM_SCREENCORRECTIONFACTOR, screenCorrectionParm ); // rpScreenCorrectionFactor
+#endif
+
+			DrawElementsWithCounters( &unitSquareSurface );
+		}
+	}
+
+	// set the window clipping
+	GL_Viewport( 0, 0, screenWidth, screenHeight );
+	GL_Scissor( 0, 0, screenWidth, screenHeight );
+
+	GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS | GLS_CULL_TWOSIDED );
+
+	if( r_ssgiFiltering.GetBool() )
+	{
+		globalFramebuffers.ambientOcclusionFBO[0]->Bind();
+
+		// FIXME remove and mix with color from previous frame
+		glClearColor( 0, 0, 0, 0 );
+		glClear( GL_COLOR_BUFFER_BIT );
+
+		renderProgManager.BindShader_DeepGBufferRadiosity();
+	}
+	else
+	{
+		if( r_ssgiDebug.GetInteger() > 0 )
+		{
+			// replace current
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS );
+		}
+		else
+		{
+			// add result to main color
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS );
+		}
+
+		if( previousFramebuffer != NULL )
+		{
+			previousFramebuffer->Bind();
+		}
+		else
+		{
+			Framebuffer::Unbind();
+		}
+
+		renderProgManager.BindShader_DeepGBufferRadiosity();
+	}
+
+	float screenCorrectionParm[4];
+	screenCorrectionParm[0] = 1.0f / screenWidth;
+	screenCorrectionParm[1] = 1.0f / screenHeight;
+	screenCorrectionParm[2] = screenWidth;
+	screenCorrectionParm[3] = screenHeight;
+	SetFragmentParm( RENDERPARM_SCREENCORRECTIONFACTOR, screenCorrectionParm ); // rpScreenCorrectionFactor
+
+#if 0
+	// RB: set unprojection matrices so we can convert zbuffer values back to camera and world spaces
+	idRenderMatrix modelViewMatrix;
+	idRenderMatrix::Transpose( *( idRenderMatrix* )backEnd.viewDef->worldSpace.modelViewMatrix, modelViewMatrix );
+	idRenderMatrix cameraToWorldMatrix;
+	if( !idRenderMatrix::Inverse( modelViewMatrix, cameraToWorldMatrix ) )
+	{
+		idLib::Warning( "cameraToWorldMatrix invert failed" );
+	}
+
+	SetVertexParms( RENDERPARM_MODELMATRIX_X, cameraToWorldMatrix[0], 4 );
+	//SetVertexParms( RENDERPARM_MODELMATRIX_X, viewDef->unprojectionToWorldRenderMatrix[0], 4 );
+#endif
+	SetVertexParms( RENDERPARM_MODELMATRIX_X, viewDef->unprojectionToCameraRenderMatrix[0], 4 );
+
+
+	float jitterTexOffset[4];
+	if( r_shadowMapRandomizeJitter.GetBool() )
+	{
+		jitterTexOffset[0] = ( rand() & 255 ) / 255.0;
+		jitterTexOffset[1] = ( rand() & 255 ) / 255.0;
+	}
+	else
+	{
+		jitterTexOffset[0] = 0;
+		jitterTexOffset[1] = 0;
+	}
+	jitterTexOffset[2] = viewDef->renderView.time[0] * 0.001f;
+	jitterTexOffset[3] = 0.0f;
+	SetFragmentParm( RENDERPARM_JITTERTEXOFFSET, jitterTexOffset ); // rpJitterTexOffset
+
+	GL_SelectTexture( 0 );
+	globalImages->currentNormalsImage->Bind();
+
+	GL_SelectTexture( 1 );
+	if( r_useHierarchicalDepthBuffer.GetBool() )
+	{
+		globalImages->hierarchicalZbufferImage->Bind();
+	}
+	else
+	{
+		globalImages->currentDepthImage->Bind();
+	}
+
+	GL_SelectTexture( 2 );
+	if( previousFramebuffer != NULL )
+	{
+		previousFramebuffer->Bind();
+	}
+	else
+	{
+		globalImages->currentRenderImage->Bind();
+	}
+
+	DrawElementsWithCounters( &unitSquareSurface );
+
+	if( r_ssgiFiltering.GetBool() )
+	{
+		float jitterTexScale[4];
+
+		// AO blur X
+#if 1
+		globalFramebuffers.ambientOcclusionFBO[1]->Bind();
+
+		renderProgManager.BindShader_DeepGBufferRadiosityBlur();
+
+		// set axis parameter
+		jitterTexScale[0] = 1;
+		jitterTexScale[1] = 0;
+		jitterTexScale[2] = 0;
+		jitterTexScale[3] = 0;
+		SetFragmentParm( RENDERPARM_JITTERTEXSCALE, jitterTexScale ); // rpJitterTexScale
+
+		GL_SelectTexture( 2 );
+		globalImages->ambientOcclusionImage[0]->Bind();
+
+		DrawElementsWithCounters( &unitSquareSurface );
+#endif
+
+		// AO blur Y
+		if( previousFramebuffer != NULL )
+		{
+			previousFramebuffer->Bind();
+		}
+		else
+		{
+			Framebuffer::Unbind();
+		}
+
+		if( r_ssgiDebug.GetInteger() > 0 )
+		{
+			// replace current
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS );
+		}
+		else
+		{
+			// add result to main color
+			GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHMASK | GLS_DEPTHFUNC_ALWAYS );
+		}
+
+		renderProgManager.BindShader_DeepGBufferRadiosityBlurAndOutput();
+
+		// set axis parameter
+		jitterTexScale[0] = 0;
+		jitterTexScale[1] = 1;
+		jitterTexScale[2] = 0;
+		jitterTexScale[3] = 0;
+		SetFragmentParm( RENDERPARM_JITTERTEXSCALE, jitterTexScale ); // rpJitterTexScale
+
+		GL_SelectTexture( 2 );
+		globalImages->ambientOcclusionImage[1]->Bind();
+
+		DrawElementsWithCounters( &unitSquareSurface );
+	}
+
+	renderProgManager.Unbind();
+
+	GL_State( GLS_DEFAULT );
+
+	//GL_CheckErrors();
+}
+
+// backend specific cvars moved out of RenderSystem_init.cpp
+idCVar r_skipPostProcess( "r_skipPostProcess", "0", CVAR_RENDERER | CVAR_BOOL, "skip all post-process renderings except bloom" );
+idCVar r_useHDR( "r_useHDR", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "Use high dynamic range rendering" );
+idCVar r_forceAmbient( "r_forceAmbient", "0.01", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "render additional ambient pass to make the game less dark", 0.0f, 1.0f );
+idCVar r_useSSAO( "r_useSSAO", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL, "use screen space ambient occlusion to darken corners" );
+
+// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#define BUGFIXEDSCREENSHOTRESOLUTION 1
+
+// backend hooks used by the shared renderer code
+
+void RB_BeginNamedEvent( const char* szName, const idVec4& color )
+{
+	// RB: colors are not supported in OpenGL
+
+	// only do this if RBDOOM-3-BFG was started by RenderDoc or some similar tool
+	if( glConfig.gremedyStringMarkerAvailable && glConfig.khronosDebugAvailable )
+	{
+		glPushDebugGroup( GL_DEBUG_SOURCE_APPLICATION_ARB, 0, GLsizei( strlen( szName ) ), szName );
+	}
+}
+
+void RB_EndNamedEvent()
+{
+	// only do this if RBDOOM-3-BFG was started by RenderDoc or some similar tool
+	if( glConfig.gremedyStringMarkerAvailable && glConfig.khronosDebugAvailable )
+	{
+		glPopDebugGroup();
+	}
+}
+
+void RB_OpenMainBlockTimestamp( renderLogMainBlock_t block )
+{
+#if defined(__APPLE__)
+	// SRS - For OSX use elapsed time query for Apple OpenGL 4.1 using GL_TIME_ELAPSED vs GL_TIMESTAMP (which is not implemented on OSX)
+	// SRS - OSX AMD drivers have a rendering bug (flashing colours) with an elasped time query when Shadow Mapping is on - turn off query for that case unless r_skipAMDWorkarounds is set
+	if( !r_useShadowMapping.GetBool() || glConfig.vendor != VENDOR_AMD || r_skipAMDWorkarounds.GetBool() )
+	{
+		if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ] == 0 )
+		{
+			glGenQueries( 1, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ] );
+		}
+
+		glBeginQuery( GL_TIME_ELAPSED_EXT, glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ] );
+	}
+
+#else
+	if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 ] == 0 )
+	{
+		glCreateQueries( GL_TIMESTAMP, 2, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 ] );
+	}
+
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 0 ], GL_TIMESTAMP );
+	glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ block * 2 + 0 ]++;
+#endif
+}
+
+void RB_CloseMainBlockTimestamp( renderLogMainBlock_t block )
+{
+#if defined(__APPLE__)
+	// SRS - For OSX use elapsed time query for Apple OpenGL 4.1 using GL_TIME_ELAPSED vs GL_TIMESTAMP (which is not implemented on OSX)
+	// SRS - OSX AMD drivers have a rendering bug (flashing colours) with an elasped time query when Shadow Mapping is on - turn off query for that case unless r_skipAMDWorkarounds is set
+	if( !r_useShadowMapping.GetBool() || glConfig.vendor != VENDOR_AMD || r_skipAMDWorkarounds.GetBool() )
+	{
+		glEndQuery( GL_TIME_ELAPSED_EXT );
+		glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ block * 2 + 1 ]++;
+	}
+
+#else
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ block * 2 + 1 ], GL_TIMESTAMP );
+	glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ block * 2 + 1 ]++;
+#endif
+}
+
+void RB_ExecuteBackEndCommands( const emptyCommand_t* cmdHead )
+{
+// SRS - For OSX skip total rendering time query due to missing GL_TIMESTAMP support in Apple OpenGL 4.1, will calculate it inside SwapCommandBuffers_FinishRendering instead
+#if !defined(__APPLE__)
+if( glConfig.timerQueryAvailable )
+{
+	if( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ MRB_GPU_TIME ] == 0 )
+	{
+		glCreateQueries( GL_TIMESTAMP, 2, &glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][MRB_GPU_TIME ] );
+	}
+
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ MRB_GPU_TIME * 2 + 0 ], GL_TIMESTAMP );
+	backEnd.ExecuteBackEndCommands( cmdHead );
+	glQueryCounter( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ][ MRB_GPU_TIME * 2 + 1 ], GL_TIMESTAMP );
+
+	glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ][ MRB_GPU_TIME * 2 + 1 ]++;
+
+	glFlush();
+}
+else
+#endif
+	{
+		backEnd.ExecuteBackEndCommands( cmdHead );
+	}
+}
+
+void RB_FinishRenderingGpuTiming( uint64* gpuMicroSec )
+{
+	// read back the start and end timer queries from the previous frame
+	if( glConfig.timerQueryAvailable )
+	{
+		GLuint64EXT gpuStartNanoseconds = 0;
+		GLuint64EXT gpuEndNanoseconds = 0;
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_GPU_TIME * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_GPU_TIME * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_GPU_TIME * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+
+			if( gpuMicroSec != NULL )
+			{
+				*gpuMicroSec = backEnd.pc.gpuMicroSec;
+			}
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_FILL_DEPTH_BUFFER  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FILL_DEPTH_BUFFER * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FILL_DEPTH_BUFFER * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuDepthMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_SSAO_PASS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_SSAO_PASS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_SSAO_PASS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuScreenSpaceAmbientOcclusionMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_AMBIENT_PASS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_AMBIENT_PASS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_AMBIENT_PASS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuAmbientPassMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_INTERACTIONS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_INTERACTIONS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_INTERACTIONS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuInteractionsMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuShaderPassMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_POSTPROCESS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_POSTPROCESS * 2 + 0], GL_QUERY_RESULT, &gpuStartNanoseconds );
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_POSTPROCESS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuPostProcessingMicroSec = ( gpuEndNanoseconds - gpuStartNanoseconds ) / 1000;
+		}
+
+// SRS - For OSX OpenGL calculate total rendering time vs direct measurement due to missing GL_TIMESTAMP support in Apple OpenGL 4.1
+#if defined(__APPLE__)
+		// SRS - On OSX gpuMicroSec starts with only a portion of the GPU rendering time, must add additional components for more accurate estimate
+		backEnd.pc.gpuMicroSec += backEnd.pc.gpuDepthMicroSec + backEnd.pc.gpuScreenSpaceAmbientOcclusionMicroSec + backEnd.pc.gpuScreenSpaceReflectionsMicroSec + backEnd.pc.gpuAmbientPassMicroSec + backEnd.pc.gpuInteractionsMicroSec + backEnd.pc.gpuShaderPassMicroSec + backEnd.pc.gpuPostProcessingMicroSec;
+
+		// SRS - For OSX elapsed time queries, no need to perform unnecessary calls to glGetQueryObjectui64vEXT since gpuStartNanoseconds will always equal 0
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_FILL_GEOMETRY_BUFFER  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FILL_GEOMETRY_BUFFER * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_FOG_ALL_LIGHTS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_FOG_ALL_LIGHTS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES_POST  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_SHADER_PASSES_POST * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_DEBUG_TOOLS  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_DEBUG_TOOLS * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ MRB_DRAW_GUI  * 2 + 1 ] > 0 )
+		{
+			glGetQueryObjectui64vEXT( glcontext.renderLogMainBlockTimeQueryIds[ glcontext.frameParity ^ 1 ][ MRB_DRAW_GUI * 2 + 1], GL_QUERY_RESULT, &gpuEndNanoseconds );
+
+			backEnd.pc.gpuMicroSec += gpuEndNanoseconds / 1000;
+		}
+
+		if( gpuMicroSec != NULL )
+		{
+			*gpuMicroSec = backEnd.pc.gpuMicroSec;
+		}
+#endif
+
+		for( int i = 0; i < MRB_TOTAL_QUERIES; i++ )
+		{
+			glcontext.renderLogMainBlockTimeQueryIssued[ glcontext.frameParity ^ 1 ][ i ] = 0;
+		}
+	}
+}
+
+void RB_CaptureRenderToFile( const char* fileName, const idScreenRect& rc )
+{
+
+	glReadBuffer( GL_BACK );
+
+	// include extra space for OpenGL padding to word boundaries
+	int	c = ( rc.GetWidth() + 3 ) * rc.GetHeight();
+	byte* data = ( byte* )R_StaticAlloc( c * 3 );
+
+	glReadPixels( rc.x1, rc.y1, rc.GetWidth(), rc.GetHeight(), GL_RGB, GL_UNSIGNED_BYTE, data );
+
+	byte* data2 = ( byte* )R_StaticAlloc( c * 4 );
+
+	for( int i = 0 ; i < c ; i++ )
+	{
+		data2[ i * 4 ] = data[ i * 3 ];
+		data2[ i * 4 + 1 ] = data[ i * 3 + 1 ];
+		data2[ i * 4 + 2 ] = data[ i * 3 + 2 ];
+		data2[ i * 4 + 3 ] = 0xff;
+	}
+
+	R_WriteTGA( fileName, data2, rc.GetWidth(), rc.GetHeight(), true );
+
+	R_StaticFree( data );
+	R_StaticFree( data2 );
+}
+
+void RB_ReadTiledPixels( int width, int height, byte* buffer, renderView_t* ref, int sysWidth, int sysHeight )
+{
+
+	// include extra space for OpenGL padding to word boundaries
+
+	byte* temp = NULL;
+	if( ref && ref->rdflags & RDF_IRRADIANCE )
+	{
+		// * 2 = sizeof( half float )
+		//temp = ( byte* )R_StaticAlloc( ENVPROBE_CAPTURE_SIZE * ENVPROBE_CAPTURE_SIZE * 3 * 2 );
+	}
+	else
+	{
+		temp = ( byte* )R_StaticAlloc( ( sysWidth + 3 ) * sysHeight * 3 );
+	}
+
+	// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#ifdef BUGFIXEDSCREENSHOTRESOLUTION
+	if( sysWidth > width )
+	{
+		sysWidth = width;
+	}
+
+	if( sysHeight > height )
+	{
+		sysHeight = height;
+	}
+
+	// make sure the game / draw thread has completed
+	commonLocal.WaitGameThread();
+
+	// discard anything currently on the list
+	tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+
+	int originalNativeWidth = glConfig.nativeScreenWidth;
+	int originalNativeHeight = glConfig.nativeScreenHeight;
+
+	//if( !ref || ( ref && !( ref->rdflags & RDF_IRRADIANCE ) ) )
+	{
+		glConfig.nativeScreenWidth = sysWidth;
+		glConfig.nativeScreenHeight = sysHeight;
+	}
+#endif
+
+	// disable scissor, so we don't need to adjust all those rects
+	r_useScissor.SetBool( false );
+
+	for( int xo = 0 ; xo < width ; xo += sysWidth )
+	{
+		for( int yo = 0 ; yo < height ; yo += sysHeight )
+		{
+			// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#ifdef BUGFIXEDSCREENSHOTRESOLUTION
+			// discard anything currently on the list
+			tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+			if( ref )
+			{
+				// ref is only used by envShot, Event_camShot, etc to grab screenshots of things in the world,
+				// so this omits the hud and other effects
+				tr.primaryWorld->RenderScene( ref );
+			}
+			else
+			{
+				// build all the draw commands without running a new game tic
+				commonLocal.Draw();
+			}
+			// this should exit right after vsync, with the GPU idle and ready to draw
+			const emptyCommand_t* cmd = tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+
+			// get the GPU busy with new commands
+			tr.RenderCommandBuffers( cmd );
+
+			// discard anything currently on the list (this triggers SwapBuffers)
+			tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+#else
+			// foresthale 2014-03-01: note: ref is always NULL in every call path to this function
+			if( ref )
+			{
+				// discard anything currently on the list
+				tr.SwapCommandBuffers( NULL, NULL, NULL, NULL );
+
+				// build commands to render the scene
+				tr.primaryWorld->RenderScene( ref );
+
+				// finish off these commands
+				const emptyCommand_t* cmd = tr.SwapCommandBuffers( NULL, NULL, NULL, NULL );
+
+				// issue the commands to the GPU
+				tr.RenderCommandBuffers( cmd );
+			}
+			else
+			{
+				const bool captureToImage = false;
+				common->UpdateScreen( captureToImage, false );
+			}
+#endif
+
+			int w = sysWidth;
+			if( xo + w > width )
+			{
+				w = width - xo;
+			}
+			int h = sysHeight;
+			if( yo + h > height )
+			{
+				h = height - yo;
+			}
+
+			if( ref && ref->rdflags & RDF_IRRADIANCE )
+			{
+				globalFramebuffers.envprobeFBO->Bind();
+
+				glPixelStorei( GL_PACK_ROW_LENGTH, ENVPROBE_CAPTURE_SIZE );
+				glReadPixels( 0, 0, w, h, GL_RGB, GL_HALF_FLOAT, buffer );
+
+				R_VerticalFlipRGB16F( buffer, w, h );
+
+				Framebuffer::Unbind();
+			}
+			else
+			{
+				glReadBuffer( GL_FRONT );
+				glReadPixels( 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, temp );
+
+				int	row = ( w * 3 + 3 ) & ~3;		// OpenGL pads to dword boundaries
+
+				for( int y = 0 ; y < h ; y++ )
+				{
+					memcpy( buffer + ( ( yo + y )* width + xo ) * 3,
+							temp + y * row, w * 3 );
+				}
+			}
+		}
+	}
+
+	// foresthale 2014-03-01: fixed custom screenshot resolution by doing a more direct render path
+#ifdef BUGFIXEDSCREENSHOTRESOLUTION
+	// discard anything currently on the list
+	tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
+
+	if( !ref || ( ref && !( ref->rdflags & RDF_IRRADIANCE ) ) )
+	{
+		glConfig.nativeScreenWidth = originalNativeWidth;
+		glConfig.nativeScreenHeight = originalNativeHeight;
+	}
+#endif
+
+	r_useScissor.SetBool( true );
+
+	R_StaticFree( temp );
+}
+
+const int BACK_BUFFER_TARGET = ( int )GL_BACK;

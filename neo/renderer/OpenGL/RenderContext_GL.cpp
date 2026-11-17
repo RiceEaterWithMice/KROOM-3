@@ -65,3 +65,13 @@ void idRenderContext::Disable()
 {
 	SDL_GL_MakeCurrent( NULL, NULL );
 }
+
+/*
+==================
+R_GetAPIName
+==================
+*/
+const char* R_GetAPIName()
+{
+	return "OpenGL";
+}

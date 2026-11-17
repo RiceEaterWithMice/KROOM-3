@@ -375,9 +375,10 @@ idStr idRenderProgManager::StripDeadCode( const idStr& in, const char* name, con
 		src.AddDefine( "DEBUG_PBR" );
 	}
 
-#if defined( USE_VULKAN )
-	src.AddDefine( "USE_VULKAN" );
-#endif
+if( glConfig.driverType == GLDRV_VULKAN )
+	{
+		src.AddDefine( "USE_VULKAN" );
+	}
 
 	// SMAA configuration
 	src.AddDefine( "SMAA_GLSL_3" );
@@ -1347,8 +1348,16 @@ idStr idRenderProgManager::ConvertCG2GLSL( const idStr& in, const char* name, rp
 	idStr filenameHint = "// filename " + idStr( name ) + "\n";
 
 // SRS - OSX OpenGL only supports up to GLSL 4.1, but current RenderProgs shaders seem to work as-is on OSX OpenGL drivers
-#if defined(__APPLE__) && !defined(USE_VULKAN)
-	idStr filenameVersion = "#version 410\n";
+#if defined(__APPLE__)
+	idStr filenameVersion;
+	if( glConfig.driverType == GLDRV_VULKAN )
+	{
+		filenameVersion = "#version 450 core\n";
+	}
+	else
+	{
+		filenameVersion = "#version 410\n";
+	}
 #else
 	idStr filenameVersionNumber;
 	idStr filenameProfile;

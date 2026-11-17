@@ -36,15 +36,8 @@ If you have questions concerning this license or the applicable additional terms
 #include "RenderCommon.h"
 
 
-#if defined(USE_VULKAN)
-
-	extern idUniformBuffer emptyUBO;
-
-	void CreateVertexDescriptions();
-
-	void CreateDescriptorPools( VkDescriptorPool( &pools )[ NUM_FRAME_DATA ] );
-
-#endif
+// backend specific render program context setup
+void RP_InitBackendContext();
 
 
 idRenderProgManager renderProgManager;
@@ -311,24 +304,7 @@ void idRenderProgManager::Init()
 
 	cmdSystem->AddCommand( "reloadShaders", R_ReloadShaders, CMD_FL_RENDERER, "reloads shaders" );
 
-#if defined(USE_VULKAN)
-	counter = 0;
-
-	// Create Vertex Descriptions
-	CreateVertexDescriptions();
-
-	// Create Descriptor Pools
-	CreateDescriptorPools( descriptorPools );
-
-	for( int i = 0; i < NUM_FRAME_DATA; ++i )
-	{
-		parmBuffers[ i ] = new idUniformBuffer();
-		parmBuffers[ i ]->AllocBufferObject( NULL, MAX_DESC_SETS * MAX_DESC_SET_UNIFORMS * sizeof( idVec4 ), BU_DYNAMIC );
-	}
-
-	// Placeholder: mainly for optionalSkinning
-	emptyUBO.AllocBufferObject( NULL, sizeof( idVec4 ), BU_DYNAMIC );
-#endif
+	RP_InitBackendContext();
 }
 
 /*

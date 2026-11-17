@@ -31,6 +31,8 @@ If you have questions concerning this license or the applicable additional terms
 #ifndef __VERTEXCACHE_H__
 #define __VERTEXCACHE_H__
 
+#include "FrameData.h"
+
 #if 1
 
 	// RB: quadruppled static memory limits for custom content

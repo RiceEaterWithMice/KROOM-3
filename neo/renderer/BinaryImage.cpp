@@ -30,6 +30,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "precompiled.h"
 #pragma hdrstop
 #include "framework/Common_local.h"
+#include "RenderCommon.h"
 
 /*
 ================================================================================================
@@ -928,10 +929,12 @@ bool idBinaryImage::LoadFromGeneratedFile( idFile* bFile, ID_TIME_T sourceTimeSt
 		// sizes are still retained, so the stored data size may be larger than
 		// just the multiplication of dimensions
 		assert( img.dataSize >= img.width * img.height * BitsForFormat( ( textureFormat_t )fileData.format ) / 8 );
-#if defined(__APPLE__) && defined(USE_VULKAN)
+#if defined(__APPLE__)
+		// SRS - macOS Vulkan needs RGB565 images converted to RGBA8 in memory
+		const bool rgb565ToRGBA8 = ( glConfig.driverType == GLDRV_VULKAN );
 		int imgfile_dataSize = img.dataSize;
 		// SRS - Allocate 2x memory to prepare for in-place conversion from FMT_RGB565 to FMT_RGBA8
-		if( ( textureFormat_t )fileData.format == FMT_RGB565 )
+		if( rgb565ToRGBA8 && ( textureFormat_t )fileData.format == FMT_RGB565 )
 		{
 			img.Alloc( img.dataSize * 2 );
 		}
@@ -951,7 +954,7 @@ bool idBinaryImage::LoadFromGeneratedFile( idFile* bFile, ID_TIME_T sourceTimeSt
 		}
 
 		// SRS - Convert FMT_RGB565 16-bits to FMT_RGBA8 32-bits in place using pre-allocated space
-		if( ( textureFormat_t )fileData.format == FMT_RGB565 )
+		if( rgb565ToRGBA8 && ( textureFormat_t )fileData.format == FMT_RGB565 )
 		{
 			//SRS - Make sure we have an integer number of RGBA8 storage slots
 			assert( img.dataSize % 4 == 0 );

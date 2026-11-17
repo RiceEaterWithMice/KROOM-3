@@ -54,7 +54,9 @@ PFN_vkCmdInsertDebugUtilsLabelEXT	qvkCmdInsertDebugUtilsLabelEXT = VK_NULL_HANDL
 
 #include "../RenderCommon.h"
 #include "../RenderBackend.h"
+#include "VulkanContext.h"
 #include "Staging_VK.h"
+#include "Allocator_VK.h"
 //#include "../../framework/Common_local.h"
 #include "../../sys/sdl/DeviceManager_SDL.h"
 
@@ -1451,7 +1453,7 @@ static void CreateFrameBuffers()
 	}
 	else
 	{
-		attachments[ 1 ] = depthImg->GetView();
+		attachments[ 1 ] = ( VkImageView )depthImg->GetView();
 	}
 
 	const bool resolve = vkcontext.sampleCount > VK_SAMPLE_COUNT_1_BIT;
@@ -1944,7 +1946,7 @@ void idRenderBackend::DrawElementsWithCounters( const drawSurf_t* surf )
 	*/
 
 	{
-		const VkBuffer buffer = indexBuffer->GetAPIObject();
+		const VkBuffer buffer = ( VkBuffer )indexBuffer->GetAPIObject();
 		const VkDeviceSize offset = indexBuffer->GetOffset();
 		vkCmdBindIndexBuffer( vkcontext.commandBuffer[ vkcontext.frameParity ], buffer, offset, VK_INDEX_TYPE_UINT16 );
 	}
@@ -1974,7 +1976,7 @@ void idRenderBackend::DrawElementsWithCounters( const drawSurf_t* surf )
 	*/
 
 	{
-		const VkBuffer buffer = vertexBuffer->GetAPIObject();
+		const VkBuffer buffer = ( VkBuffer )vertexBuffer->GetAPIObject();
 		const VkDeviceSize offset = vertexBuffer->GetOffset();
 		vkCmdBindVertexBuffers( vkcontext.commandBuffer[ vkcontext.frameParity ], 0, 1, &buffer, &offset );
 	}
@@ -2764,3 +2766,175 @@ void idRenderBackend::ImGui_RenderDrawLists( ImDrawData* draw_data )
 {
 	tr.guiModel->EmitImGui( draw_data );
 }
+
+// Vulkan texture unit assignments for interaction rendering
+const int INTERACTION_TEXUNIT_AMBIENT_CUBE1 = 5;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE1 = 6;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE2 = 7;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE3 = 8;
+
+// stubs for the GL-only hooks, the Vulkan backend does not use them
+
+void GL_BindShadowMapFBO( int shadowLOD, int side )
+{
+	( void )shadowLOD;
+	( void )side;
+}
+
+void GL_ReadHDR64Pixels( float* image )
+{
+	memset( image, 0, 64 * 64 * 4 * sizeof( float ) );
+}
+
+void GL_SetClearColor( float r, float g, float b, float a )
+{
+	( void )r;
+	( void )g;
+	( void )b;
+	( void )a;
+}
+
+void GL_ClearColorBuffer()
+{
+}
+
+void GL_BindGlobalVAO()
+{
+}
+
+void idRenderBackend::HDRPostProcess( const viewDef_t* _viewDef, bool useHDR )
+{
+	( void )_viewDef;
+	( void )useHDR;
+}
+
+void idRenderBackend::DrawPostProcess( const void* data )
+{
+	( void )data;
+}
+
+void idRenderBackend::DrawScreenSpaceAmbientOcclusionGL( const viewDef_t* _viewDef, bool downModulateScreen )
+{
+	( void )_viewDef;
+	( void )downModulateScreen;
+}
+
+void idRenderBackend::DrawScreenSpaceGlobalIlluminationGL( const viewDef_t* _viewDef )
+{
+	( void )_viewDef;
+}
+
+// the render log main block queries must fit into the timestamp query pool
+compile_time_assert( NUM_TIMESTAMP_QUERIES >= ( MRB_TOTAL_QUERIES ) );
+
+// backend specific cvars moved out of RenderSystem_init.cpp
+idCVar r_skipPostProcess( "r_skipPostProcess", "1", CVAR_RENDERER | CVAR_BOOL, "skip all post-process renderings except bloom" );
+idCVar r_useHDR( "r_useHDR", "0", CVAR_RENDERER | CVAR_ROM | CVAR_STATIC | CVAR_BOOL, "Can't be changed, is broken on Vulkan backend" );
+idCVar r_forceAmbient( "r_forceAmbient", "0.01", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "render additional ambient pass to make the game less dark", 0.0f, 0.75f );
+idCVar r_useSSAO( "r_useSSAO", "0", CVAR_RENDERER | CVAR_ROM | CVAR_STATIC | CVAR_BOOL, "use screen space ambient occlusion to darken corners" );
+
+// Vulkan implementations and stubs of the hooks used by the shared renderer code
+
+void RB_BeginNamedEvent( const char* szName, const idVec4& color )
+{
+	// start an annotated group of calls under the this name
+	// SRS - Prefer VK_EXT_debug_utils over VK_EXT_debug_marker/VK_EXT_debug_report (deprecated by VK_EXT_debug_utils)
+	if( vkcontext.debugUtilsSupportAvailable )
+	{
+		VkDebugUtilsLabelEXT label = {};
+		label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+		label.pLabelName = szName;
+		label.color[0] = color.x;
+		label.color[1] = color.y;
+		label.color[2] = color.z;
+		label.color[3] = color.w;
+
+		qvkCmdBeginDebugUtilsLabelEXT( vkcontext.commandBuffer[ vkcontext.frameParity ], &label );
+	}
+	else if( vkcontext.debugMarkerSupportAvailable )
+	{
+		VkDebugMarkerMarkerInfoEXT  label = {};
+		label.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_MARKER_INFO_EXT;
+		label.pMarkerName = szName;
+		label.color[0] = color.x;
+		label.color[1] = color.y;
+		label.color[2] = color.z;
+		label.color[3] = color.w;
+
+		qvkCmdDebugMarkerBeginEXT( vkcontext.commandBuffer[ vkcontext.frameParity ], &label );
+	}
+}
+
+void RB_EndNamedEvent()
+{
+	// SRS - Prefer VK_EXT_debug_utils over VK_EXT_debug_marker/VK_EXT_debug_report (deprecated by VK_EXT_debug_utils)
+	if( vkcontext.debugUtilsSupportAvailable )
+	{
+		qvkCmdEndDebugUtilsLabelEXT( vkcontext.commandBuffer[ vkcontext.frameParity ] );
+	}
+	else if( vkcontext.debugMarkerSupportAvailable )
+	{
+		qvkCmdDebugMarkerEndEXT( vkcontext.commandBuffer[ vkcontext.frameParity ] );
+	}
+}
+
+void RB_OpenMainBlockTimestamp( renderLogMainBlock_t block )
+{
+	if( vkcontext.queryIndex[ vkcontext.frameParity ] >= ( NUM_TIMESTAMP_QUERIES - 1 ) )
+	{
+		return;
+	}
+
+	VkCommandBuffer commandBuffer = vkcontext.commandBuffer[ vkcontext.frameParity ];
+	VkQueryPool queryPool = vkcontext.queryPools[ vkcontext.frameParity ];
+
+	uint32 queryIndex = vkcontext.queryAssignedIndex[ vkcontext.frameParity ][ block * 2 + 0 ] = vkcontext.queryIndex[ vkcontext.frameParity ]++;
+	vkCmdWriteTimestamp( commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queryPool, queryIndex );
+
+}
+
+void RB_CloseMainBlockTimestamp( renderLogMainBlock_t block )
+{
+	if( vkcontext.queryIndex[ vkcontext.frameParity ] >= ( NUM_TIMESTAMP_QUERIES - 1 ) )
+	{
+		return;
+	}
+
+	VkCommandBuffer commandBuffer = vkcontext.commandBuffer[ vkcontext.frameParity ];
+	VkQueryPool queryPool = vkcontext.queryPools[ vkcontext.frameParity ];
+
+	uint32 queryIndex = vkcontext.queryAssignedIndex[ vkcontext.frameParity ][ block * 2 + 1 ] = vkcontext.queryIndex[ vkcontext.frameParity ]++;
+	vkCmdWriteTimestamp( commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queryPool, queryIndex );
+
+}
+
+void RB_ExecuteBackEndCommands( const emptyCommand_t* cmdHead )
+{
+	backEnd.ExecuteBackEndCommands( cmdHead );
+}
+
+void RB_FinishRenderingGpuTiming( uint64* gpuMicroSec )
+{
+	if( gpuMicroSec != NULL )
+	{
+		*gpuMicroSec = backEnd.pc.gpuMicroSec;
+	}
+}
+
+void RB_CaptureRenderToFile( const char* fileName, const idScreenRect& rc )
+{
+	( void )fileName;
+	( void )rc;
+}
+
+void RB_ReadTiledPixels( int width, int height, byte* buffer, renderView_t* ref, int sysWidth, int sysHeight )
+{
+	( void )width;
+	( void )height;
+	( void )buffer;
+	( void )ref;
+	( void )sysWidth;
+	( void )sysHeight;
+}
+
+const int BACK_BUFFER_TARGET = 0;

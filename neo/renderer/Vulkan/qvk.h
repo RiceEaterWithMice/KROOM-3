@@ -30,15 +30,7 @@ If you have questions concerning this license or the applicable additional terms
 #ifndef __QVK_H__
 #define __QVK_H__
 
-#if defined( USE_VULKAN )
-
-#define USE_AMD_ALLOCATOR
-
 #include <vulkan/vulkan.h>
-
-#if defined( USE_AMD_ALLOCATOR )
-	#include "vk_mem_alloc.h"
-#endif
 
 #define ID_VK_CHECK( x ) { \
 	VkResult ret = x; \
@@ -74,7 +66,5 @@ extern PFN_vkQueueEndDebugUtilsLabelEXT		qvkQueueEndDebugUtilsLabelEXT;
 extern PFN_vkCmdBeginDebugUtilsLabelEXT		qvkCmdBeginDebugUtilsLabelEXT;
 extern PFN_vkCmdEndDebugUtilsLabelEXT		qvkCmdEndDebugUtilsLabelEXT;
 extern PFN_vkCmdInsertDebugUtilsLabelEXT	qvkCmdInsertDebugUtilsLabelEXT;
-
-#endif
 
 #endif /* !__QVK_H__ */

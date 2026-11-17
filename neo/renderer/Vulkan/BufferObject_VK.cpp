@@ -33,7 +33,12 @@ If you have questions concerning this license or the applicable additional terms
 #include "../RenderCommon.h"
 #include "../RenderBackend.h"
 #include "../BufferObject.h"
+#include "VulkanContext.h"
 #include "Staging_VK.h"
+#include "Allocator_VK.h"
+
+// the shared buffer object keeps its allocation in opaque storage
+#define allocation ( *( vulkanAllocation_t* )allocationStorage )
 
 extern idCVar r_showBuffers;
 
@@ -72,7 +77,7 @@ idVertexBuffer::AllocBufferObject
 */
 bool idVertexBuffer::AllocBufferObject( const void* data, int allocSize, bufferUsageType_t _usage )
 {
-	assert( apiObject == VK_NULL_HANDLE );
+	assert( apiObject == 0 );
 	assert_16_byte_aligned( data );
 
 	if( allocSize <= 0 )
@@ -98,31 +103,11 @@ bool idVertexBuffer::AllocBufferObject( const void* data, int allocSize, bufferU
 		bufferCreateInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	}
 
-#if defined( USE_AMD_ALLOCATOR )
-	VmaAllocationCreateInfo vmaReq = {};
-	if( usage == BU_STATIC )
-	{
-		vmaReq.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-	}
-	else if( usage == BU_DYNAMIC )
-	{
-#if defined(__APPLE__)
-		// SRS - VMA_MEMORY_USAGE_CPU_ONLY required for BU_DYNAMIC host coherency on OSX, otherwise black screen
-		vmaReq.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-#else
-		vmaReq.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-#endif
-		vmaReq.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-	}
-
-	ID_VK_CHECK( vmaCreateBuffer( vmaAllocator, &bufferCreateInfo, &vmaReq, &apiObject, &vmaAllocation, &allocation ) );
-
-#else
-	VkResult ret = vkCreateBuffer( vkcontext.device, &bufferCreateInfo, NULL, &apiObject );
+	VkResult ret = vkCreateBuffer( vkcontext.device, &bufferCreateInfo, NULL, ( VkBuffer* )&apiObject );
 	assert( ret == VK_SUCCESS );
 
 	VkMemoryRequirements memoryRequirements = {};
-	vkGetBufferMemoryRequirements( vkcontext.device, apiObject, &memoryRequirements );
+	vkGetBufferMemoryRequirements( vkcontext.device, ( VkBuffer )apiObject, &memoryRequirements );
 
 #if defined(__APPLE__)
 	// SRS - VULKAN_MEMORY_USAGE_CPU_ONLY required for BU_DYNAMIC host coherency on OSX, otherwise black screen
@@ -138,9 +123,7 @@ bool idVertexBuffer::AllocBufferObject( const void* data, int allocSize, bufferU
 					 memUsage,
 					 VULKAN_ALLOCATION_TYPE_BUFFER );
 
-	ID_VK_CHECK( vkBindBufferMemory( vkcontext.device, apiObject, allocation.deviceMemory, allocation.offset ) );
-#endif
-
+	ID_VK_CHECK( vkBindBufferMemory( vkcontext.device, ( VkBuffer )apiObject, allocation.deviceMemory, allocation.offset ) );
 	if( r_showBuffers.GetBool() )
 	{
 		idLib::Printf( "vertex buffer alloc %p, (%i bytes)\n", this, GetSize() );
@@ -174,7 +157,7 @@ void idVertexBuffer::FreeBufferObject()
 		return;
 	}
 
-	if( apiObject == VK_NULL_HANDLE )
+	if( apiObject == 0 )
 	{
 		return;
 	}
@@ -184,20 +167,12 @@ void idVertexBuffer::FreeBufferObject()
 		idLib::Printf( "vertex buffer free %p, (%i bytes)\n", this, GetSize() );
 	}
 
-	if( apiObject != VK_NULL_HANDLE )
+	if( apiObject != 0 )
 	{
-#if defined( USE_AMD_ALLOCATOR )
-		vmaDestroyBuffer( vmaAllocator, apiObject, vmaAllocation );
-		apiObject = VK_NULL_HANDLE;
-		allocation = VmaAllocationInfo();
-		vmaAllocation = NULL;
-#else
 		vulkanAllocator.Free( allocation );
-		vkDestroyBuffer( vkcontext.device, apiObject, NULL );
-		apiObject = VK_NULL_HANDLE;
-		allocation = vulkanAllocation_t();
-#endif
-	}
+		vkDestroyBuffer( vkcontext.device, ( VkBuffer )apiObject, NULL );
+		apiObject = 0;
+		allocation = vulkanAllocation_t();	}
 
 	ClearWithoutFreeing();
 }
@@ -209,7 +184,7 @@ idVertexBuffer::Update
 */
 void idVertexBuffer::Update( const void* data, int size, int offset ) const
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 	assert_16_byte_aligned( data );
 	assert( ( GetOffset() & 15 ) == 0 );
 
@@ -221,12 +196,7 @@ void idVertexBuffer::Update( const void* data, int size, int offset ) const
 	if( usage == BU_DYNAMIC )
 	{
 		CopyBuffer(
-#if defined( USE_AMD_ALLOCATOR )
-			( byte* )allocation.pMappedData + GetOffset() + offset,
-#else
-			allocation.data + GetOffset() + offset,
-#endif
-			( const byte* )data, size );
+			allocation.data + GetOffset() + offset,			( const byte* )data, size );
 	}
 	else
 	{
@@ -242,7 +212,7 @@ void idVertexBuffer::Update( const void* data, int size, int offset ) const
 		bufferCopy.dstOffset = GetOffset() + offset;
 		bufferCopy.size = size;
 
-		vkCmdCopyBuffer( commandBuffer, stageBuffer, apiObject, 1, &bufferCopy );
+		vkCmdCopyBuffer( commandBuffer, stageBuffer, ( VkBuffer )apiObject, 1, &bufferCopy );
 	}
 }
 
@@ -253,19 +223,14 @@ idVertexBuffer::MapBuffer
 */
 void* idVertexBuffer::MapBuffer( bufferMapType_t mapType )
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 
 	if( usage == BU_STATIC )
 	{
 		idLib::FatalError( "idVertexBuffer::MapBuffer: Cannot map a buffer marked as BU_STATIC." );
 	}
 
-#if defined( USE_AMD_ALLOCATOR )
-	void* buffer = ( byte* )allocation.pMappedData + GetOffset();
-#else
 	void* buffer = allocation.data + GetOffset();
-#endif
-
 	SetMapped();
 
 	if( buffer == NULL )
@@ -282,7 +247,7 @@ idVertexBuffer::UnmapBuffer
 */
 void idVertexBuffer::UnmapBuffer()
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 
 	if( usage == BU_STATIC )
 	{
@@ -301,14 +266,8 @@ void idVertexBuffer::ClearWithoutFreeing()
 {
 	size = 0;
 	offsetInOtherBuffer = OWNS_BUFFER_FLAG;
-	apiObject = VK_NULL_HANDLE;
-#if defined( USE_AMD_ALLOCATOR )
-	allocation = VmaAllocationInfo();
-	vmaAllocation = NULL;
-#else
-	allocation.deviceMemory = VK_NULL_HANDLE;
-#endif
-}
+	apiObject = 0;
+	allocation.deviceMemory = VK_NULL_HANDLE;}
 
 /*
 ================================================================================================
@@ -335,7 +294,7 @@ idIndexBuffer::AllocBufferObject
 */
 bool idIndexBuffer::AllocBufferObject( const void* data, int allocSize, bufferUsageType_t _usage )
 {
-	assert( apiObject == VK_NULL_HANDLE );
+	assert( apiObject == 0 );
 	assert_16_byte_aligned( data );
 
 	if( allocSize <= 0 )
@@ -360,31 +319,11 @@ bool idIndexBuffer::AllocBufferObject( const void* data, int allocSize, bufferUs
 		bufferCreateInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	}
 
-#if defined( USE_AMD_ALLOCATOR )
-	VmaAllocationCreateInfo vmaReq = {};
-	if( usage == BU_STATIC )
-	{
-		vmaReq.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-	}
-	else if( usage == BU_DYNAMIC )
-	{
-#if defined(__APPLE__)
-		// SRS - VMA_MEMORY_USAGE_CPU_ONLY required for BU_DYNAMIC host coherency on OSX, otherwise black screen
-		vmaReq.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-#else
-		vmaReq.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-#endif
-		vmaReq.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-	}
-
-	ID_VK_CHECK( vmaCreateBuffer( vmaAllocator, &bufferCreateInfo, &vmaReq, &apiObject, &vmaAllocation, &allocation ) );
-
-#else
-	VkResult ret = vkCreateBuffer( vkcontext.device, &bufferCreateInfo, NULL, &apiObject );
+	VkResult ret = vkCreateBuffer( vkcontext.device, &bufferCreateInfo, NULL, ( VkBuffer* )&apiObject );
 	assert( ret == VK_SUCCESS );
 
 	VkMemoryRequirements memoryRequirements = {};
-	vkGetBufferMemoryRequirements( vkcontext.device, apiObject, &memoryRequirements );
+	vkGetBufferMemoryRequirements( vkcontext.device, ( VkBuffer )apiObject, &memoryRequirements );
 
 #if defined(__APPLE__)
 	// SRS - VULKAN_MEMORY_USAGE_CPU_ONLY required for BU_DYNAMIC host coherency on OSX, otherwise black screen
@@ -400,9 +339,7 @@ bool idIndexBuffer::AllocBufferObject( const void* data, int allocSize, bufferUs
 					 memUsage,
 					 VULKAN_ALLOCATION_TYPE_BUFFER );
 
-	ID_VK_CHECK( vkBindBufferMemory( vkcontext.device, apiObject, allocation.deviceMemory, allocation.offset ) );
-#endif
-
+	ID_VK_CHECK( vkBindBufferMemory( vkcontext.device, ( VkBuffer )apiObject, allocation.deviceMemory, allocation.offset ) );
 	if( r_showBuffers.GetBool() )
 	{
 		idLib::Printf( "index buffer alloc %p, (%i bytes)\n", this, GetSize() );
@@ -436,7 +373,7 @@ void idIndexBuffer::FreeBufferObject()
 		return;
 	}
 
-	if( apiObject == VK_NULL_HANDLE )
+	if( apiObject == 0 )
 	{
 		return;
 	}
@@ -446,20 +383,12 @@ void idIndexBuffer::FreeBufferObject()
 		idLib::Printf( "index buffer free %p, (%i bytes)\n", this, GetSize() );
 	}
 
-	if( apiObject != VK_NULL_HANDLE )
+	if( apiObject != 0 )
 	{
-#if defined( USE_AMD_ALLOCATOR )
-		vmaDestroyBuffer( vmaAllocator, apiObject, vmaAllocation );
-		apiObject = VK_NULL_HANDLE;
-		allocation = VmaAllocationInfo();
-		vmaAllocation = NULL;
-#else
 		vulkanAllocator.Free( allocation );
-		vkDestroyBuffer( vkcontext.device, apiObject, NULL );
-		apiObject = VK_NULL_HANDLE;
-		allocation = vulkanAllocation_t();
-#endif
-	}
+		vkDestroyBuffer( vkcontext.device, ( VkBuffer )apiObject, NULL );
+		apiObject = 0;
+		allocation = vulkanAllocation_t();	}
 
 	ClearWithoutFreeing();
 }
@@ -471,7 +400,7 @@ idIndexBuffer::Update
 */
 void idIndexBuffer::Update( const void* data, int size, int offset ) const
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 	assert_16_byte_aligned( data );
 	assert( ( GetOffset() & 15 ) == 0 );
 
@@ -483,12 +412,7 @@ void idIndexBuffer::Update( const void* data, int size, int offset ) const
 	if( usage == BU_DYNAMIC )
 	{
 		CopyBuffer(
-#if defined( USE_AMD_ALLOCATOR )
-			( byte* )allocation.pMappedData + GetOffset() + offset,
-#else
-			allocation.data + GetOffset() + offset,
-#endif
-			( const byte* )data, size );
+			allocation.data + GetOffset() + offset,			( const byte* )data, size );
 	}
 	else
 	{
@@ -504,7 +428,7 @@ void idIndexBuffer::Update( const void* data, int size, int offset ) const
 		bufferCopy.dstOffset = GetOffset() + offset;
 		bufferCopy.size = size;
 
-		vkCmdCopyBuffer( commandBuffer, stageBuffer, apiObject, 1, &bufferCopy );
+		vkCmdCopyBuffer( commandBuffer, stageBuffer, ( VkBuffer )apiObject, 1, &bufferCopy );
 	}
 }
 
@@ -515,19 +439,14 @@ idIndexBuffer::MapBuffer
 */
 void* idIndexBuffer::MapBuffer( bufferMapType_t mapType )
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 
 	if( usage == BU_STATIC )
 	{
 		idLib::FatalError( "idIndexBuffer::MapBuffer: Cannot map a buffer marked as BU_STATIC." );
 	}
 
-#if defined( USE_AMD_ALLOCATOR )
-	void* buffer = ( byte* )allocation.pMappedData + GetOffset();
-#else
 	void* buffer = allocation.data + GetOffset();
-#endif
-
 	SetMapped();
 
 	if( buffer == NULL )
@@ -544,7 +463,7 @@ idIndexBuffer::UnmapBuffer
 */
 void idIndexBuffer::UnmapBuffer()
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 
 	if( usage == BU_STATIC )
 	{
@@ -563,14 +482,8 @@ void idIndexBuffer::ClearWithoutFreeing()
 {
 	size = 0;
 	offsetInOtherBuffer = OWNS_BUFFER_FLAG;
-	apiObject = VK_NULL_HANDLE;
-#if defined( USE_AMD_ALLOCATOR )
-	allocation = VmaAllocationInfo();
-	vmaAllocation = NULL;
-#else
-	allocation.deviceMemory = VK_NULL_HANDLE;
-#endif
-}
+	apiObject = 0;
+	allocation.deviceMemory = VK_NULL_HANDLE;}
 
 /*
 ================================================================================================
@@ -598,7 +511,7 @@ idUniformBuffer::AllocBufferObject
 */
 bool idUniformBuffer::AllocBufferObject( const void* data, int allocSize, bufferUsageType_t _usage )
 {
-	assert( apiObject == VK_NULL_HANDLE );
+	assert( apiObject == 0 );
 	assert_16_byte_aligned( data );
 
 	if( allocSize <= 0 )
@@ -623,31 +536,11 @@ bool idUniformBuffer::AllocBufferObject( const void* data, int allocSize, buffer
 		bufferCreateInfo.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	}
 
-#if defined( USE_AMD_ALLOCATOR )
-	VmaAllocationCreateInfo vmaReq = {};
-	if( usage == BU_STATIC )
-	{
-		vmaReq.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-	}
-	else if( usage == BU_DYNAMIC )
-	{
-#if defined(__APPLE__)
-		// SRS - VMA_MEMORY_USAGE_CPU_ONLY required for BU_DYNAMIC host coherency on OSX, otherwise black screen
-		vmaReq.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-#else
-		vmaReq.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-#endif
-		vmaReq.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-	}
-
-	ID_VK_CHECK( vmaCreateBuffer( vmaAllocator, &bufferCreateInfo, &vmaReq, &apiObject, &vmaAllocation, &allocation ) );
-
-#else
-	VkResult ret = vkCreateBuffer( vkcontext.device, &bufferCreateInfo, NULL, &apiObject );
+	VkResult ret = vkCreateBuffer( vkcontext.device, &bufferCreateInfo, NULL, ( VkBuffer* )&apiObject );
 	assert( ret == VK_SUCCESS );
 
 	VkMemoryRequirements memoryRequirements = {};
-	vkGetBufferMemoryRequirements( vkcontext.device, apiObject, &memoryRequirements );
+	vkGetBufferMemoryRequirements( vkcontext.device, ( VkBuffer )apiObject, &memoryRequirements );
 
 #if defined(__APPLE__)
 	// SRS - VULKAN_MEMORY_USAGE_CPU_ONLY required for BU_DYNAMIC host coherency on OSX, otherwise black screen
@@ -663,9 +556,7 @@ bool idUniformBuffer::AllocBufferObject( const void* data, int allocSize, buffer
 					 memUsage,
 					 VULKAN_ALLOCATION_TYPE_BUFFER );
 
-	ID_VK_CHECK( vkBindBufferMemory( vkcontext.device, apiObject, allocation.deviceMemory, allocation.offset ) );
-#endif
-
+	ID_VK_CHECK( vkBindBufferMemory( vkcontext.device, ( VkBuffer )apiObject, allocation.deviceMemory, allocation.offset ) );
 	if( r_showBuffers.GetBool() )
 	{
 		idLib::Printf( "joint buffer alloc %p, (%i bytes)\n", this, GetSize() );
@@ -699,7 +590,7 @@ void idUniformBuffer::FreeBufferObject()
 		return;
 	}
 
-	if( apiObject == VK_NULL_HANDLE )
+	if( apiObject == 0 )
 	{
 		return;
 	}
@@ -709,20 +600,12 @@ void idUniformBuffer::FreeBufferObject()
 		idLib::Printf( "joint buffer free %p, (%i bytes)\n", this, GetSize() );
 	}
 
-	if( apiObject != VK_NULL_HANDLE )
+	if( apiObject != 0 )
 	{
-#if defined( USE_AMD_ALLOCATOR )
-		vmaDestroyBuffer( vmaAllocator, apiObject, vmaAllocation );
-		apiObject = VK_NULL_HANDLE;
-		allocation = VmaAllocationInfo();
-		vmaAllocation = NULL;
-#else
 		vulkanAllocator.Free( allocation );
-		vkDestroyBuffer( vkcontext.device, apiObject, NULL );
-		apiObject = VK_NULL_HANDLE;
-		allocation = vulkanAllocation_t();
-#endif
-	}
+		vkDestroyBuffer( vkcontext.device, ( VkBuffer )apiObject, NULL );
+		apiObject = 0;
+		allocation = vulkanAllocation_t();	}
 
 	ClearWithoutFreeing();
 }
@@ -734,7 +617,7 @@ idUniformBuffer::Update
 */
 void idUniformBuffer::Update( const void* data, int size, int offset ) const
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 	assert_16_byte_aligned( data );
 	assert( ( GetOffset() & 15 ) == 0 );
 
@@ -746,12 +629,7 @@ void idUniformBuffer::Update( const void* data, int size, int offset ) const
 	if( usage == BU_DYNAMIC )
 	{
 		CopyBuffer(
-#if defined( USE_AMD_ALLOCATOR )
-			( byte* )allocation.pMappedData + GetOffset() + offset,
-#else
-			allocation.data + GetOffset() + offset,
-#endif
-			( const byte* )data, size );
+			allocation.data + GetOffset() + offset,			( const byte* )data, size );
 	}
 	else
 	{
@@ -767,7 +645,7 @@ void idUniformBuffer::Update( const void* data, int size, int offset ) const
 		bufferCopy.dstOffset = GetOffset() + offset;
 		bufferCopy.size = size;
 
-		vkCmdCopyBuffer( commandBuffer, stageBuffer, apiObject, 1, &bufferCopy );
+		vkCmdCopyBuffer( commandBuffer, stageBuffer, ( VkBuffer )apiObject, 1, &bufferCopy );
 	}
 }
 
@@ -779,19 +657,14 @@ idUniformBuffer::MapBuffer
 void* idUniformBuffer::MapBuffer( bufferMapType_t mapType )
 {
 	assert( mapType == BM_WRITE );
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 
 	if( usage == BU_STATIC )
 	{
 		idLib::FatalError( "idUniformBuffer::MapBuffer: Cannot map a buffer marked as BU_STATIC." );
 	}
 
-#if defined( USE_AMD_ALLOCATOR )
-	void* buffer = ( byte* )allocation.pMappedData + GetOffset();
-#else
 	void* buffer = allocation.data + GetOffset();
-#endif
-
 	SetMapped();
 
 	if( buffer == NULL )
@@ -808,7 +681,7 @@ idUniformBuffer::UnmapBuffer
 */
 void idUniformBuffer::UnmapBuffer()
 {
-	assert( apiObject != VK_NULL_HANDLE );
+	assert( apiObject != 0 );
 
 	if( usage == BU_STATIC )
 	{
@@ -827,11 +700,5 @@ void idUniformBuffer::ClearWithoutFreeing()
 {
 	size = 0;
 	offsetInOtherBuffer = OWNS_BUFFER_FLAG;
-	apiObject = VK_NULL_HANDLE;
-#if defined( USE_AMD_ALLOCATOR )
-	allocation = VmaAllocationInfo();
-	vmaAllocation = NULL;
-#else
-	allocation.deviceMemory = VK_NULL_HANDLE;
-#endif
-}
+	apiObject = 0;
+	allocation.deviceMemory = VK_NULL_HANDLE;}
