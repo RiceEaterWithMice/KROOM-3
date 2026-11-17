@@ -364,9 +364,10 @@ if(USE_VULKAN)
 		endif()
 		message(STATUS "Using Vulkan: " ${Vulkan_LIBRARY})
 	endif()
-else()
-	include_directories(extern/glad/include)
 endif()
+
+# glad declarations are used by shared renderer headers in both backends
+include_directories(extern/glad/include)
 
 ##################### Dependencies ###########################
 

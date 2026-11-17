@@ -665,7 +665,7 @@ void idRenderBackend::DrawElementsWithCounters( const drawSurf_t* surf )
 		assert( ( jointBuffer.GetOffset() & ( glConfig.uniformBufferOffsetAlignment - 1 ) ) == 0 );
 
 		// RB: 64 bit fixes, changed GLuint to GLintptr
-		const GLintptr ubo = jointBuffer.GetAPIObject();
+		const GLintptr ubo = ( GLintptr )jointBuffer.GetAPIObject();
 		// RB end
 
 		glBindBufferRange( GL_UNIFORM_BUFFER, 0, ubo, jointBuffer.GetOffset(), jointBuffer.GetSize() );

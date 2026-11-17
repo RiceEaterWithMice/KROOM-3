@@ -29,12 +29,7 @@ If you have questions concerning this license or the applicable additional terms
 #ifndef __BUFFEROBJECT_H__
 #define __BUFFEROBJECT_H__
 
-#if defined( USE_VULKAN )
-	#include "Vulkan/qvk.h"
-	#include "Vulkan/Allocator_VK.h"
-#else
-	#include <glad/gl.h>
-#endif
+#include <glad/gl.h>
 
 enum bufferMapType_t
 {
@@ -79,17 +74,10 @@ public:
 	{
 		return usage;
 	}
-#if defined( USE_VULKAN )
-	VkBuffer			GetAPIObject() const
+uint64				GetAPIObject() const
 	{
 		return apiObject;
 	}
-#else
-	GLintptr			GetAPIObject() const
-	{
-		return apiObject;
-	}
-#endif
 	int					GetOffset() const
 	{
 		return ( offsetInOtherBuffer & ~OWNS_BUFFER_FLAG );
@@ -119,21 +107,10 @@ protected:
 	int					offsetInOtherBuffer;	// offset in bytes
 	bufferUsageType_t	usage;
 
-#if defined( USE_VULKAN )
-	VkBuffer			apiObject;
-
-#if defined( USE_AMD_ALLOCATOR )
-	VmaAllocation		vmaAllocation;
-	VmaAllocationInfo	allocation;
-#else
-	vulkanAllocation_t	allocation;
-#endif
-
-#else
-	// GL
-	GLintptr			apiObject;
-	void* 				buffer;
-#endif
+// backend specific data, interpreted by the backend implementations
+	uint64				apiObject;				// GL buffer object name or VkBuffer handle
+	void* 				buffer;					// mapped pointer, OpenGL only
+	uint64				allocationStorage[ 8 ];	// vulkanAllocation_t, Vulkan only
 
 	// sizeof() confuses typeinfo...
 	static const int	MAPPED_FLAG			= 1 << ( 4 /* sizeof( int ) */ * 8 - 1 );

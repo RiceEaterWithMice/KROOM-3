@@ -32,11 +32,7 @@ If you have questions concerning this license or the applicable additional terms
 #ifndef __IMAGE_H__
 #define __IMAGE_H__
 
-#if defined( USE_VULKAN )
-	#include "Vulkan/qvk.h"
-#else
-	#include <glad/gl.h>
-#endif
+#include <glad/gl.h>
 
 enum textureType_t
 {
@@ -337,26 +333,25 @@ public:
 	// Platform specific implementations
 	//---------------------------------------------
 
-#if defined( USE_VULKAN )
 	static void	EmptyGarbage();
 
-	VkImage		GetImage() const
+	// backend specific texture handles, interpreted by the backend implementations
+	uint64		GetImage() const
 	{
 		return image;
 	}
-	VkImageView	GetView() const
+	uint64		GetView() const
 	{
 		return view;
 	}
-	VkImageLayout GetLayout() const
+	uint64		GetLayout() const
 	{
 		return layout;
 	}
-	VkSampler	GetSampler() const
+	uint64		GetSampler() const
 	{
 		return sampler;
 	}
-#endif
 
 	void		AllocImage( const idImageOpts& imgOpts, textureFilter_t filter, textureRepeat_t repeat );
 
@@ -430,11 +425,8 @@ public:
 			ActuallyLoadImage( true );
 		}
 
-#if defined( USE_VULKAN )
-		return ( void* )( intptr_t )image;
-#else
-		return ( void* )( intptr_t )texnum;
-#endif
+		// the Vulkan backend stores its handle in image, the GL backend in texnum
+		return ( void* )( intptr_t )( image != 0 ? image : texnum );
 
 	}
 	// DG end
@@ -467,39 +459,24 @@ private:
 
 	static const uint32 TEXTURE_NOT_LOADED = 0xFFFFFFFF;
 
-#if defined( USE_VULKAN )
 	void				CreateSampler();
-	// SRS - added method to set image layout
-	void                SetImageLayout( VkImage image, VkImageSubresourceRange subresourceRange, VkImageLayout oldImageLayout, VkImageLayout newImageLayout );
-	// SRS End
 
-	bool				bIsSwapChainImage;
-	VkFormat			internalFormat;
-	VkImage				image;
-	VkImageView			view;
-	VkImageLayout		layout;
-	VkSampler			sampler;
-
-#if defined( USE_AMD_ALLOCATOR )
-	VmaAllocation		allocation;
-	static idList< VmaAllocation >		allocationGarbage[ NUM_FRAME_DATA ];
-#else
-	vulkanAllocation_t	allocation;
-	static idList< vulkanAllocation_t > allocationGarbage[ NUM_FRAME_DATA ];
-#endif
-
-	static int						garbageIndex;
-	static idList< VkImage >		imageGarbage[ NUM_FRAME_DATA ];
-	static idList< VkImageView >	viewGarbage[ NUM_FRAME_DATA ];
-	static idList< VkSampler >		samplerGarbage[ NUM_FRAME_DATA ];
-#else
-	GLuint				texnum;				// gl texture binding
+	// OpenGL specific
+	uint32				texnum;				// gl texture binding
 
 	// we could derive these in subImageUpload each time if necessary
-	GLuint				internalFormat;
-	GLuint				dataFormat;
-	GLuint				dataType;
-#endif
+	uint32				internalFormat;
+	uint32				dataFormat;
+	uint32				dataType;
+
+	// Vulkan specific, interpreted by the backend implementation
+	bool				bIsSwapChainImage;
+	uint64				vkFormat;				// VkFormat
+	uint64				image;					// VkImage
+	uint64				view;					// VkImageView
+	uint64				layout;					// VkImageLayout
+	uint64				sampler;				// VkSampler
+	uint64				allocationStorage[ 8 ];	// vulkanAllocation_t
 };
 
 // data is RGBA

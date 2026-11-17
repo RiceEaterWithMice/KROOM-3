@@ -41,16 +41,16 @@ Contains the Image implementation for Vulkan
 
 #include "../RenderCommon.h"
 #include "Staging_VK.h"
+#include "Allocator_VK.h"
 
-int						idImage::garbageIndex = 0;
-#if defined( USE_AMD_ALLOCATOR )
-	idList< VmaAllocation > idImage::allocationGarbage[ NUM_FRAME_DATA ];
-#else
-	idList< vulkanAllocation_t > idImage::allocationGarbage[ NUM_FRAME_DATA ];
-#endif
-idList< VkImage >		idImage::imageGarbage[ NUM_FRAME_DATA ];
-idList< VkImageView >	idImage::viewGarbage[ NUM_FRAME_DATA ];
-idList< VkSampler >		idImage::samplerGarbage[ NUM_FRAME_DATA ];
+// the shared image class keeps its allocation in opaque storage
+#define allocation ( *( vulkanAllocation_t* )allocationStorage )
+
+static int					imageGarbageIndex = 0;
+static idList< vulkanAllocation_t >	allocationGarbage[ NUM_FRAME_DATA ];
+static idList< VkImage >			imageGarbage[ NUM_FRAME_DATA ];
+static idList< VkImageView >		viewGarbage[ NUM_FRAME_DATA ];
+static idList< VkSampler >			samplerGarbage[ NUM_FRAME_DATA ];
 
 extern VkFormat ChooseSupportedFormat( VkFormat* formats, int numFormats, VkImageTiling tiling, VkFormatFeatureFlags features );
 extern VkFormat formats[];
@@ -198,11 +198,11 @@ idImage::idImage( const char* name ) : imgName( name )
 {
 	// Vulkan specific
 	bIsSwapChainImage = false;
-	internalFormat = VK_FORMAT_UNDEFINED;
-	image = VK_NULL_HANDLE;
-	view = VK_NULL_HANDLE;
+	vkFormat = VK_FORMAT_UNDEFINED;
+	image = 0;
+	view = 0;
 	layout = VK_IMAGE_LAYOUT_GENERAL;
-	sampler = VK_NULL_HANDLE;
+	sampler = 0;
 
 	generatorFunction = NULL;
 	filter = TF_DEFAULT;
@@ -238,7 +238,7 @@ idImage::IsLoaded
 */
 bool idImage::IsLoaded() const
 {
-	return image != VK_NULL_HANDLE; // TODO_VK maybe do something better than this.
+	return image != 0; // TODO_VK maybe do something better than this.
 }
 
 /*
@@ -328,7 +328,7 @@ void idImage::CreateSampler()
 			idLib::FatalError( "idImage::CreateSampler: unrecognized texture repeat mode %d", repeat );
 	}
 
-	ID_VK_CHECK( vkCreateSampler( vkcontext.device, &createInfo, NULL, &sampler ) );
+	ID_VK_CHECK( vkCreateSampler( vkcontext.device, &createInfo, NULL, ( VkSampler* )&sampler ) );
 }
 
 /*
@@ -338,24 +338,12 @@ idImage::EmptyGarbage
 */
 void idImage::EmptyGarbage()
 {
-	garbageIndex = ( garbageIndex + 1 ) % NUM_FRAME_DATA;
+	imageGarbageIndex = ( imageGarbageIndex + 1 ) % NUM_FRAME_DATA;
 
-#if defined( USE_AMD_ALLOCATOR )
-	idList< VmaAllocation >& allocationsToFree = allocationGarbage[ garbageIndex ];
-#else
-	idList< vulkanAllocation_t >& allocationsToFree = allocationGarbage[ garbageIndex ];
-#endif
-	idList< VkImage >& imagesToFree = imageGarbage[ garbageIndex ];
-	idList< VkImageView >& viewsToFree = viewGarbage[ garbageIndex ];
-	idList< VkSampler >& samplersToFree = samplerGarbage[ garbageIndex ];
+	idList< vulkanAllocation_t >& allocationsToFree = allocationGarbage[ imageGarbageIndex ];	idList< VkImage >& imagesToFree = imageGarbage[ imageGarbageIndex ];
+	idList< VkImageView >& viewsToFree = viewGarbage[ imageGarbageIndex ];
+	idList< VkSampler >& samplersToFree = samplerGarbage[ imageGarbageIndex ];
 
-#if defined( USE_AMD_ALLOCATOR )
-	const int numAllocations = allocationsToFree.Num();
-	for( int i = 0; i < numAllocations; ++i )
-	{
-		vmaDestroyImage( vmaAllocator, imagesToFree[ i ], allocationsToFree[ i ] );
-	}
-#else
 	const int numAllocations = allocationsToFree.Num();
 	for( int i = 0; i < numAllocations; ++i )
 	{
@@ -367,8 +355,6 @@ void idImage::EmptyGarbage()
 	{
 		vkDestroyImage( vkcontext.device, imagesToFree[ i ], NULL );
 	}
-#endif
-
 	const int numViews = viewsToFree.Num();
 	for( int i = 0; i < numViews; ++i )
 	{
@@ -417,7 +403,7 @@ void idImage::CopyFramebuffer( int x, int y, int imageWidth, int imageHeight )
 	dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	dstBarrier.image = GetImage();
+	dstBarrier.image = ( VkImage )GetImage();
 	dstBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	dstBarrier.subresourceRange.baseMipLevel = 0;
 	dstBarrier.subresourceRange.levelCount = 1;
@@ -456,7 +442,7 @@ void idImage::CopyFramebuffer( int x, int y, int imageWidth, int imageHeight )
 		vkCmdBlitImage(
 			commandBuffer,
 			vkcontext.swapchainImages[ vkcontext.currentSwapIndex ], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			( VkImage )GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1, &region, VK_FILTER_NEAREST );
 	}
 
@@ -529,7 +515,7 @@ void idImage::AllocImage()
 {
 	PurgeImage();
 
-	internalFormat = VK_GetFormatFromTextureFormat( opts.format );
+	vkFormat = VK_GetFormatFromTextureFormat( opts.format );
 
 	// Create Sampler
 	CreateSampler();
@@ -549,7 +535,7 @@ void idImage::AllocImage()
 	imageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	imageCreateInfo.flags = ( opts.textureType == TT_CUBIC ) ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
 	imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-	imageCreateInfo.format = internalFormat;
+	imageCreateInfo.format = ( VkFormat )vkFormat;
 	imageCreateInfo.extent.width = opts.width;
 	imageCreateInfo.extent.height = opts.height;
 	imageCreateInfo.extent.depth = 1;
@@ -561,16 +547,10 @@ void idImage::AllocImage()
 	imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-#if defined( USE_AMD_ALLOCATOR )
-	VmaAllocationCreateInfo vmaReq = {};
-	vmaReq.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-	ID_VK_CHECK( vmaCreateImage( vmaAllocator, &imageCreateInfo, &vmaReq, &image, &allocation, NULL ) );
-#else
-	ID_VK_CHECK( vkCreateImage( vkcontext.device, &imageCreateInfo, NULL, &image ) );
+	ID_VK_CHECK( vkCreateImage( vkcontext.device, &imageCreateInfo, NULL, ( VkImage* )&image ) );
 
 	VkMemoryRequirements memoryRequirements;
-	vkGetImageMemoryRequirements( vkcontext.device, image, &memoryRequirements );
+	vkGetImageMemoryRequirements( vkcontext.device, ( VkImage )image, &memoryRequirements );
 
 	allocation = vulkanAllocator.Allocate(
 					 memoryRequirements.size,
@@ -579,25 +559,23 @@ void idImage::AllocImage()
 					 VULKAN_MEMORY_USAGE_GPU_ONLY,
 					 VULKAN_ALLOCATION_TYPE_IMAGE_OPTIMAL );
 
-	ID_VK_CHECK( vkBindImageMemory( vkcontext.device, image, allocation.deviceMemory, allocation.offset ) );
-#endif
-
+	ID_VK_CHECK( vkBindImageMemory( vkcontext.device, ( VkImage )image, allocation.deviceMemory, allocation.offset ) );
 	// Eric: disable for now to clean the terminal output
 	// idLib::Printf( "Vulkan Image alloc '%s': %p\n", GetName(), image );
 
 	// Create Image View
 	VkImageViewCreateInfo viewCreateInfo = {};
 	viewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	viewCreateInfo.image = image;
+	viewCreateInfo.image = ( VkImage )image;
 	viewCreateInfo.viewType = ( opts.textureType == TT_CUBIC ) ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
-	viewCreateInfo.format = internalFormat;
+	viewCreateInfo.format = ( VkFormat )vkFormat;
 	viewCreateInfo.components = VK_GetComponentMappingFromTextureFormat( opts.format, opts.colorFormat );
 	viewCreateInfo.subresourceRange.aspectMask = ( opts.format == FMT_DEPTH ) ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 	viewCreateInfo.subresourceRange.levelCount = opts.numLevels;
 	viewCreateInfo.subresourceRange.layerCount = ( opts.textureType == TT_CUBIC || opts.textureType == TT_2D_ARRAY ) ? 6 : 1;
 	viewCreateInfo.subresourceRange.baseMipLevel = 0;
 
-	ID_VK_CHECK( vkCreateImageView( vkcontext.device, &viewCreateInfo, NULL, &view ) );
+	ID_VK_CHECK( vkCreateImageView( vkcontext.device, &viewCreateInfo, NULL, ( VkImageView* )&view ) );
 }
 
 /*
@@ -607,26 +585,21 @@ idImage::PurgeImage
 */
 void idImage::PurgeImage()
 {
-	if( sampler != VK_NULL_HANDLE )
+	if( sampler != 0 )
 	{
-		samplerGarbage[ garbageIndex ].Append( sampler );
-		sampler = VK_NULL_HANDLE;
+		samplerGarbage[ imageGarbageIndex ].Append( ( VkSampler )sampler );
+		sampler = 0;
 	}
 
-	if( image != VK_NULL_HANDLE )
+	if( image != 0 )
 	{
-		allocationGarbage[ garbageIndex ].Append( allocation );
-		viewGarbage[ garbageIndex ].Append( view );
-		imageGarbage[ garbageIndex ].Append( image );
+		allocationGarbage[ imageGarbageIndex ].Append( allocation );
+		viewGarbage[ imageGarbageIndex ].Append( ( VkImageView )view );
+		imageGarbage[ imageGarbageIndex ].Append( ( VkImage )image );
 
-#if defined( USE_AMD_ALLOCATOR )
-		allocation = NULL;
-#else
 		allocation = vulkanAllocation_t();
-#endif
-
-		view = VK_NULL_HANDLE;
-		image = VK_NULL_HANDLE;
+		view = 0;
+		image = 0;
 	}
 }
 
@@ -757,7 +730,7 @@ void idImage::SubImageUpload( int mipLevel, int x, int y, int z, int width, int 
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barrier.image = image;
+	barrier.image = ( VkImage )image;
 	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	barrier.subresourceRange.baseMipLevel = 0;
 	barrier.subresourceRange.levelCount = opts.numLevels;
@@ -770,7 +743,7 @@ void idImage::SubImageUpload( int mipLevel, int x, int y, int z, int width, int 
 	barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 	vkCmdPipelineBarrier( commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &barrier );
 
-	vkCmdCopyBufferToImage( commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imgCopy );
+	vkCmdCopyBufferToImage( commandBuffer, buffer, ( VkImage )image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imgCopy );
 
 	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -780,127 +753,3 @@ void idImage::SubImageUpload( int mipLevel, int x, int y, int z, int width, int 
 
 	layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }
-
-// SRS - added method to set image layout
-/*
-====================
-idImage::SetImageLayout
-====================
-*/
-void idImage::SetImageLayout( VkImage image, VkImageSubresourceRange subresourceRange, VkImageLayout oldImageLayout, VkImageLayout newImageLayout )
-{
-
-	VkBuffer buffer;
-	VkCommandBuffer commandBuffer;
-	int size = 0;
-	int offset = 0;
-	byte* data = stagingManager.Stage( size, 16, commandBuffer, buffer, offset );
-
-	VkImageMemoryBarrier barrier = {};
-	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barrier.image = image;
-	barrier.subresourceRange = subresourceRange;
-	barrier.oldLayout = oldImageLayout;
-	barrier.newLayout = newImageLayout;
-
-	// Source layouts (old)
-	// Source access mask controls actions that have to be finished on the old layout before it will be transitioned to the new layout
-	switch( oldImageLayout )
-	{
-		case VK_IMAGE_LAYOUT_UNDEFINED:
-			// Image layout is undefined (or does not matter)
-			// Only valid as initial layout
-			// No flags required, listed only for completeness
-			barrier.srcAccessMask = 0;
-			break;
-
-		case VK_IMAGE_LAYOUT_PREINITIALIZED:
-			// Image is preinitialized
-			// Only valid as initial layout for linear images, preserves memory contents
-			// Make sure host writes have been finished
-			barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-			// Image is a color attachment
-			// Make sure any writes to the color buffer have been finished
-			barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-			// Image is a depth/stencil attachment
-			// Make sure any writes to the depth/stencil buffer have been finished
-			barrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-			// Image is a transfer source
-			// Make sure any reads from the image have been finished
-			barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-			// Image is a transfer destination
-			// Make sure any writes to the image have been finished
-			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-			// Image is read by a shader
-			// Make sure any shader reads from the image have been finished
-			barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			break;
-
-		default:
-			// Other source layouts aren't handled (yet)
-			break;
-	}
-
-	// Target layouts (new)
-	// Destination access mask controls the dependency for the new image layout
-	switch( newImageLayout )
-	{
-		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-			// Image will be used as a transfer destination
-			// Make sure any writes to the image have been finished
-			barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-			// Image will be used as a transfer source
-			// Make sure any reads from the image have been finished
-			barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-			// Image will be used as a color attachment
-			// Make sure any writes to the color buffer have been finished
-			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-			// Image layout will be used as a depth/stencil attachment
-			// Make sure any writes to depth/stencil buffer have been finished
-			barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-			break;
-
-		case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-			// Image will be read in a shader (sampler, input attachment)
-			// Make sure any writes to the image have been finished
-			if( barrier.srcAccessMask == 0 )
-			{
-				barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			}
-			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			break;
-
-		default:
-			// Other destination layouts aren't handled (yet)
-			break;
-	}
-
-	vkCmdPipelineBarrier( commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 0, NULL, 0, NULL, 1, &barrier );
-}
-// SRS End

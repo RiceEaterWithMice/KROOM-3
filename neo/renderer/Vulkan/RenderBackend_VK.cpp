@@ -55,6 +55,7 @@ PFN_vkCmdInsertDebugUtilsLabelEXT	qvkCmdInsertDebugUtilsLabelEXT = VK_NULL_HANDL
 #include "../RenderCommon.h"
 #include "../RenderBackend.h"
 #include "Staging_VK.h"
+#include "Allocator_VK.h"
 //#include "../../framework/Common_local.h"
 #include "../../sys/sdl/DeviceManager_SDL.h"
 
@@ -1451,7 +1452,7 @@ static void CreateFrameBuffers()
 	}
 	else
 	{
-		attachments[ 1 ] = depthImg->GetView();
+		attachments[ 1 ] = ( VkImageView )depthImg->GetView();
 	}
 
 	const bool resolve = vkcontext.sampleCount > VK_SAMPLE_COUNT_1_BIT;
@@ -1944,7 +1945,7 @@ void idRenderBackend::DrawElementsWithCounters( const drawSurf_t* surf )
 	*/
 
 	{
-		const VkBuffer buffer = indexBuffer->GetAPIObject();
+		const VkBuffer buffer = ( VkBuffer )indexBuffer->GetAPIObject();
 		const VkDeviceSize offset = indexBuffer->GetOffset();
 		vkCmdBindIndexBuffer( vkcontext.commandBuffer[ vkcontext.frameParity ], buffer, offset, VK_INDEX_TYPE_UINT16 );
 	}
@@ -1974,7 +1975,7 @@ void idRenderBackend::DrawElementsWithCounters( const drawSurf_t* surf )
 	*/
 
 	{
-		const VkBuffer buffer = vertexBuffer->GetAPIObject();
+		const VkBuffer buffer = ( VkBuffer )vertexBuffer->GetAPIObject();
 		const VkDeviceSize offset = vertexBuffer->GetOffset();
 		vkCmdBindVertexBuffers( vkcontext.commandBuffer[ vkcontext.frameParity ], 0, 1, &buffer, &offset );
 	}

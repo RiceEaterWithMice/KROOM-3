@@ -117,7 +117,7 @@ bool idVertexBuffer::AllocBufferObject( const void* data, int allocSize, bufferU
 	{
 		idLib::FatalError( "idVertexBuffer::AllocBufferObject: failed" );
 	}
-	glBindBuffer( GL_ARRAY_BUFFER, apiObject );
+	glBindBuffer( GL_ARRAY_BUFFER, ( GLuint )apiObject );
 
 	// these are rewritten every frame
 	glBufferDataARB( GL_ARRAY_BUFFER, numBytes, NULL, bufferUsage );
@@ -201,7 +201,7 @@ void idVertexBuffer::Update( const void* data, int updateSize, int offset ) cons
 	}
 	else
 	{
-		glBindBuffer( GL_ARRAY_BUFFER, apiObject );
+		glBindBuffer( GL_ARRAY_BUFFER, ( GLuint )apiObject );
 		glBufferSubData( GL_ARRAY_BUFFER, GetOffset() + offset, ( GLsizeiptrARB )numBytes, data );
 	}
 }
@@ -218,7 +218,7 @@ void* idVertexBuffer::MapBuffer( bufferMapType_t mapType )
 
 	buffer = NULL;
 
-	glBindBuffer( GL_ARRAY_BUFFER, apiObject );
+	glBindBuffer( GL_ARRAY_BUFFER, ( GLuint )apiObject );
 	if( mapType == BM_READ )
 	{
 		buffer = glMapBufferRange( GL_ARRAY_BUFFER_ARB, 0, GetAllocedSize(), GL_MAP_READ_BIT /*| GL_MAP_UNSYNCHRONIZED_BIT*/ );
@@ -261,7 +261,7 @@ void idVertexBuffer::UnmapBuffer()
 	assert( apiObject != 0xFFFF );
 	assert( IsMapped() );
 
-	glBindBuffer( GL_ARRAY_BUFFER, apiObject );
+	glBindBuffer( GL_ARRAY_BUFFER, ( GLuint )apiObject );
 	if( !glUnmapBuffer( GL_ARRAY_BUFFER ) )
 	{
 		idLib::Printf( "idVertexBuffer::UnmapBuffer failed\n" );
@@ -335,7 +335,7 @@ bool idIndexBuffer::AllocBufferObject( const void* data, int allocSize, bufferUs
 		GLenum error = glGetError();
 		idLib::FatalError( "idIndexBuffer::AllocBufferObject: failed - GL_Error %d", error );
 	}
-	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, apiObject );
+	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ( GLuint )apiObject );
 
 	// these are rewritten every frame
 	glBufferData( GL_ELEMENT_ARRAY_BUFFER, numBytes, NULL, bufferUsage );
@@ -419,7 +419,7 @@ void idIndexBuffer::Update( const void* data, int updateSize, int offset ) const
 	}
 	else
 	{
-		glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, apiObject );
+		glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ( GLuint )apiObject );
 		glBufferSubData( GL_ELEMENT_ARRAY_BUFFER, GetOffset() + offset, ( GLsizeiptrARB )numBytes, data );
 	}
 }
@@ -436,7 +436,7 @@ void* idIndexBuffer::MapBuffer( bufferMapType_t mapType )
 
 	buffer = NULL;
 
-	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, apiObject );
+	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ( GLuint )apiObject );
 	if( mapType == BM_READ )
 	{
 		//buffer = glMapBufferARB( GL_ELEMENT_ARRAY_BUFFER_ARB, GL_READ_ONLY_ARB );
@@ -482,7 +482,7 @@ void idIndexBuffer::UnmapBuffer()
 	assert( apiObject != 0xFFFF );
 	assert( IsMapped() );
 
-	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, apiObject );
+	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, ( GLuint )apiObject );
 	if( !glUnmapBuffer( GL_ELEMENT_ARRAY_BUFFER ) )
 	{
 		idLib::Printf( "idIndexBuffer::UnmapBuffer failed\n" );
@@ -549,7 +549,7 @@ bool idUniformBuffer::AllocBufferObject( const void* data, int allocSize, buffer
 	const int numBytes = GetAllocedSize();
 
 	glGenBuffers( 1, ( GLuint* )&apiObject );
-	glBindBuffer( GL_UNIFORM_BUFFER, apiObject );
+	glBindBuffer( GL_UNIFORM_BUFFER, ( GLuint )apiObject );
 	glBufferData( GL_UNIFORM_BUFFER, numBytes, NULL, GL_STREAM_DRAW_ARB );
 	glBindBuffer( GL_UNIFORM_BUFFER, 0 );
 
@@ -626,7 +626,7 @@ void idUniformBuffer::Update( const void* data, int updateSize, int offset ) con
 	}
 	else
 	{
-		glBindBuffer( GL_ARRAY_BUFFER, apiObject );
+		glBindBuffer( GL_ARRAY_BUFFER, ( GLuint )apiObject );
 		glBufferSubData( GL_ARRAY_BUFFER, GetOffset() + offset, ( GLsizeiptr )numBytes, data );
 	}
 }
@@ -646,7 +646,7 @@ void* idUniformBuffer::MapBuffer( bufferMapType_t mapType )
 
 	buffer = NULL;
 
-	glBindBuffer( GL_UNIFORM_BUFFER, apiObject );
+	glBindBuffer( GL_UNIFORM_BUFFER, ( GLuint )apiObject );
 	numBytes = numBytes;
 	assert( GetOffset() == 0 );
 
@@ -676,7 +676,7 @@ void idUniformBuffer::UnmapBuffer()
 	assert( apiObject != 0xFFFF );
 	assert( IsMapped() );
 
-	glBindBuffer( GL_UNIFORM_BUFFER, apiObject );
+	glBindBuffer( GL_UNIFORM_BUFFER, ( GLuint )apiObject );
 	if( !glUnmapBuffer( GL_UNIFORM_BUFFER ) )
 	{
 		idLib::Printf( "idUniformBuffer::UnmapBuffer failed\n" );

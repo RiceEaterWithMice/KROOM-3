@@ -1257,7 +1257,7 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 
 				VkDescriptorBufferInfo& bufferInfo = bufferInfos[ bufferIndex++ ];
 				memset( &bufferInfo, 0, sizeof( VkDescriptorBufferInfo ) );
-				bufferInfo.buffer = ubo->GetAPIObject();
+				bufferInfo.buffer = ( VkBuffer )ubo->GetAPIObject();
 				bufferInfo.offset = ubo->GetOffset();
 				bufferInfo.range = ubo->GetSize();
 
@@ -1278,11 +1278,11 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 
 				VkDescriptorImageInfo& imageInfo = imageInfos[ imageIndex++ ];
 				memset( &imageInfo, 0, sizeof( VkDescriptorImageInfo ) );
-				imageInfo.imageLayout = image->GetLayout();
-				imageInfo.imageView = image->GetView();
-				imageInfo.sampler = image->GetSampler();
+				imageInfo.imageLayout = ( VkImageLayout )image->GetLayout();
+				imageInfo.imageView = ( VkImageView )image->GetView();
+				imageInfo.sampler = ( VkSampler )image->GetSampler();
 
-				assert( image->GetView() != VK_NULL_HANDLE );
+				assert( image->GetView() != 0 );
 
 				VkWriteDescriptorSet& write = writes[ writeIndex++ ];
 				memset( &write, 0, sizeof( VkWriteDescriptorSet ) );
