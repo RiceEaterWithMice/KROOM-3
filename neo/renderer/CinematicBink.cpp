@@ -420,11 +420,15 @@ cinData_t idCinematicBink::ImageForTimeBinkDec( int thisTime )
 		}
 		else if( h < CIN_HEIGHT )
 		{
-#if defined(__APPLE__) && defined(USE_VULKAN)
+#if defined(__APPLE__)
 			// SRS - For U and V channels on OSX Vulkan use full height image to work around stall that occurs with half-height chroma planes
 			// when exiting levels or returning from demo playback - depends on OSX-specific logic inside Vulkan version of SubImageUpload()
-			h = CIN_HEIGHT;
-#else
+			if( glConfig.driverType == GLDRV_VULKAN )
+			{
+				h = CIN_HEIGHT;
+			}
+			else
+			{
 			// the U and V channels have a lower resolution than the Y channel
 			// (or the logical video resolution), so use the aspect ratio to
 			// calculate the real height
@@ -433,7 +437,7 @@ cinData_t idCinematicBink::ImageForTimeBinkDec( int thisTime )
 			{
 				h = hExp;
 			}
-#endif
+			}
 		}
 
 		if( img->GetUploadWidth() != w || img->GetUploadHeight() != h )

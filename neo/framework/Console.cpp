@@ -453,11 +453,7 @@ float idConsoleLocal::DrawFPS( float y )
 	const uint64 totalCPUTime = ( com_smp.GetInteger() > 0 && com_editors == 0 ? Max( gameThreadTotalTime, rendererBackEndTime ) : gameThreadTotalTime + rendererBackEndTime );
 	const uint64 totalFrameTime = ( com_smp.GetInteger() > 0 && com_editors == 0 ? Max( gameThreadTotalTime, rendererEndFrameSyncTime ) : gameThreadTotalTime + rendererEndFrameSyncTime ) + rendererStartFrameSyncTime;
 
-#if defined( USE_VULKAN )
-	const char* API = "Vulkan";
-#else
-	const char* API = "OpenGL";
-#endif
+	const char* API = R_GetAPIName();
 
 	extern idCVar r_antiAliasing;
 	static const int aaNumValues = 5;

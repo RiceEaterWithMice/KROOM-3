@@ -455,4 +455,7 @@ void R_LightProjectionMatrix( const idVec3& origin, const idPlane& rearPlane, id
 // used by the view shot taker
 void R_ScreenshotFilename( int& lastNumber, const char* base, idStr& fileName );
 
+// name of the graphics API the active render backend uses, for console display
+const char* R_GetAPIName();
+
 #endif /* !__RENDERER_H__ */

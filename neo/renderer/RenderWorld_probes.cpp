@@ -1125,11 +1125,7 @@ CONSOLE_COMMAND( bakeEnvironmentProbes, "Bake environment probes", NULL )
 			// discard anything currently on the list (this triggers SwapBuffers)
 			tr.SwapCommandBuffers( NULL, NULL, NULL, NULL, NULL, NULL );
 
-#if defined(USE_VULKAN)
 
-			// TODO
-
-#else
 
 			glFinish();
 
@@ -1143,7 +1139,7 @@ CONSOLE_COMMAND( bakeEnvironmentProbes, "Bake environment probes", NULL )
 			R_VerticalFlipRGB16F( float16FRGB, captureSize, captureSize );
 
 			Framebuffer::Unbind();
-#endif
+
 
 #endif
 			buffers[ j ] = float16FRGB;
