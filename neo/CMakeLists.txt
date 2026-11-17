@@ -353,6 +353,8 @@ if(USE_VULKAN)
 		if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 			# SRS - Enable Beta extensions for VULKAN_SDK portability subset features on OSX
 			add_definitions(-DVK_ENABLE_BETA_EXTENSIONS)
+			# SRS - macOS MoltenVK/Metal needs triple buffering for full screen to work properly
+			add_definitions(-DVK_TRIPLE_BUFFER)
 			# SRS - Optionally use MoltenVK headers/library for runtime config functions on OSX
 			if(USE_MoltenVK)
 				add_definitions(-DUSE_MoltenVK)

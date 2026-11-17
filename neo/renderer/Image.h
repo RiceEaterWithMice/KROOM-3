@@ -32,6 +32,12 @@ If you have questions concerning this license or the applicable additional terms
 #ifndef __IMAGE_H__
 #define __IMAGE_H__
 
+#if defined( USE_VULKAN )
+	#include "Vulkan/qvk.h"
+#else
+	#include <glad/gl.h>
+#endif
+
 enum textureType_t
 {
 	TT_DISABLED,

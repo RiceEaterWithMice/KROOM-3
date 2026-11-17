@@ -33,6 +33,7 @@ If you have questions concerning this license or the applicable additional terms
 #define __RENDERER_BACKEND_H__
 
 #include "RenderLog.h"
+#include "FrameData.h"
 
 bool			GL_CheckErrors_( const char* filename, int line );
 #if 1 // !defined(RETAIL)
@@ -117,6 +118,7 @@ void RB_SetVertexColorParms( stageVertexColor_t svc );
 // SRS - Generalized Vulkan SDL platform
 #include <SDL.h>
 #include <SDL_vulkan.h>
+#include "Vulkan/qvk.h"
 
 struct gpuInfo_t
 {
@@ -218,6 +220,8 @@ struct vulkanContext_t
 extern vulkanContext_t vkcontext;
 
 #else //if defined( ID_OPENGL )
+
+#include <glad/gl.h>
 
 struct glContext_t
 {

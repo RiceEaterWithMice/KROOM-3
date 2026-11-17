@@ -30,7 +30,10 @@ If you have questions concerning this license or the applicable additional terms
 #define __BUFFEROBJECT_H__
 
 #if defined( USE_VULKAN )
+	#include "Vulkan/qvk.h"
 	#include "Vulkan/Allocator_VK.h"
+#else
+	#include <glad/gl.h>
 #endif
 
 enum bufferMapType_t
