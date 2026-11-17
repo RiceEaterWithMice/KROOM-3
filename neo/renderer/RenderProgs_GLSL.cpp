@@ -1358,6 +1358,7 @@ idStr idRenderProgManager::ConvertCG2GLSL( const idStr& in, const char* name, rp
 	{
 		filenameVersion = "#version 410\n";
 	}
+#else
 	idStr filenameVersionNumber;
 	idStr filenameProfile;
 
@@ -1395,6 +1396,7 @@ idStr idRenderProgManager::ConvertCG2GLSL( const idStr& in, const char* name, rp
 			break;
 	}
 	idStr filenameVersion = "#version " + filenameVersionNumber + filenameProfile + "\n";
+#endif
 
 	// RB: changed to allow multiple versions of GLSL
 	if( stage == SHADER_STAGE_VERTEX )

@@ -428,6 +428,7 @@ cinData_t idCinematicBink::ImageForTimeBinkDec( int thisTime )
 				h = CIN_HEIGHT;
 			}
 			else
+#endif
 			{
 			// the U and V channels have a lower resolution than the Y channel
 			// (or the logical video resolution), so use the aspect ratio to
