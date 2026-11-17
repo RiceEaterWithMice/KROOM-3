@@ -32,6 +32,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "../RenderCommon.h"
 #include "../RenderBackend.h"
+#include "VulkanContext.h"
 #include "Staging_VK.h"
 
 idCVar r_vkUploadBufferSizeMB( "r_vkUploadBufferSizeMB", "64", CVAR_INTEGER | CVAR_INIT, "Size of gpu upload buffer." );

@@ -40,6 +40,7 @@ Contains the Image implementation for Vulkan
 */
 
 #include "../RenderCommon.h"
+#include "VulkanContext.h"
 #include "Staging_VK.h"
 #include "Allocator_VK.h"
 

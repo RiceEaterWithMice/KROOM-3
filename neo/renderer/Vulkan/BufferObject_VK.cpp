@@ -33,6 +33,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "../RenderCommon.h"
 #include "../RenderBackend.h"
 #include "../BufferObject.h"
+#include "VulkanContext.h"
 #include "Staging_VK.h"
 #include "Allocator_VK.h"
 

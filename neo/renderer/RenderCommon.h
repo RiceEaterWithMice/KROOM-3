@@ -1248,11 +1248,6 @@ IMPLEMENTATION SPECIFIC FUNCTIONS
 ====================================================================
 */
 
-// SRS - Generalized Vulkan SDL platform
-#if defined(USE_VULKAN)
-	extern vulkanContext_t vkcontext;
-#endif
-
 /*
 ============================================================
 

@@ -32,6 +32,7 @@ If you have questions concerning this license or the applicable additional terms
 #pragma hdrstop
 
 #include "../RenderCommon.h"
+#include "VulkanContext.h"
 #include "../RenderProgs.h"
 
 // definition for the Vulkan-side render program state declared in RenderBackend.h

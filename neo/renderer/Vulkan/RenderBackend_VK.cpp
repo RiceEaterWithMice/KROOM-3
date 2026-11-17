@@ -54,6 +54,7 @@ PFN_vkCmdInsertDebugUtilsLabelEXT	qvkCmdInsertDebugUtilsLabelEXT = VK_NULL_HANDL
 
 #include "../RenderCommon.h"
 #include "../RenderBackend.h"
+#include "VulkanContext.h"
 #include "Staging_VK.h"
 #include "Allocator_VK.h"
 //#include "../../framework/Common_local.h"
