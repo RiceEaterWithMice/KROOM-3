@@ -1734,3 +1734,9 @@ void idRenderBackend::ImGui_RenderDrawLists( ImDrawData* draw_data )
 {
 	tr.guiModel->EmitImGui( draw_data );
 }
+
+// GL texture unit assignments for interaction rendering
+const int INTERACTION_TEXUNIT_AMBIENT_CUBE1 = 7;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE1 = 8;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE2 = 9;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE3 = 10;

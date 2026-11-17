@@ -2764,3 +2764,9 @@ void idRenderBackend::ImGui_RenderDrawLists( ImDrawData* draw_data )
 {
 	tr.guiModel->EmitImGui( draw_data );
 }
+
+// Vulkan texture unit assignments for interaction rendering
+const int INTERACTION_TEXUNIT_AMBIENT_CUBE1 = 5;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE1 = 6;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE2 = 7;
+const int INTERACTION_TEXUNIT_SPECULAR_CUBE3 = 8;

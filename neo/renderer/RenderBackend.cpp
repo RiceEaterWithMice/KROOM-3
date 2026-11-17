@@ -1209,17 +1209,7 @@ const int INTERACTION_TEXUNIT_PROJECTION	= 4;	// RB: also SSAO render target
 const int INTERACTION_TEXUNIT_SHADOWMAPS	= 5;
 const int INTERACTION_TEXUNIT_JITTER		= 6;
 
-#if defined( USE_VULKAN )
-	const int INTERACTION_TEXUNIT_AMBIENT_CUBE1 = 5;
-	const int INTERACTION_TEXUNIT_SPECULAR_CUBE1 = 6;
-	const int INTERACTION_TEXUNIT_SPECULAR_CUBE2 = 7;
-	const int INTERACTION_TEXUNIT_SPECULAR_CUBE3 = 8;
-#else
-	const int INTERACTION_TEXUNIT_AMBIENT_CUBE1 = 7;
-	const int INTERACTION_TEXUNIT_SPECULAR_CUBE1 = 8;
-	const int INTERACTION_TEXUNIT_SPECULAR_CUBE2 = 9;
-	const int INTERACTION_TEXUNIT_SPECULAR_CUBE3 = 10;
-#endif
+// texture unit assignments are defined per backend, see RenderBackend.h
 
 /*
 ==================
@@ -1410,10 +1400,11 @@ void idRenderBackend::DrawSingleInteraction( drawInteraction_t* din, bool useFas
 		globalImages->brdfLutImage->Bind();
 
 		GL_SelectTexture( INTERACTION_TEXUNIT_PROJECTION );
-#if defined( USE_VULKAN )
-		globalImages->whiteImage->Bind();
-#else
-		if( !r_useSSAO.GetBool() || ( viewDef->renderView.rdflags & ( RDF_NOAMBIENT | RDF_IRRADIANCE ) ) )
+if( glConfig.driverType == GLDRV_VULKAN )
+		{
+			globalImages->whiteImage->Bind();
+		}
+		else if( !r_useSSAO.GetBool() || ( viewDef->renderView.rdflags & ( RDF_NOAMBIENT | RDF_IRRADIANCE ) ) )
 		{
 			globalImages->whiteImage->Bind();
 		}
@@ -1421,7 +1412,6 @@ void idRenderBackend::DrawSingleInteraction( drawInteraction_t* din, bool useFas
 		{
 			globalImages->ambientOcclusionImage[0]->Bind();
 		}
-#endif
 
 		GL_SelectTexture( INTERACTION_TEXUNIT_AMBIENT_CUBE1 );
 		lightGrid.GetIrradianceImage()->Bind();
@@ -1492,10 +1482,11 @@ void idRenderBackend::DrawSingleInteraction( drawInteraction_t* din, bool useFas
 		globalImages->brdfLutImage->Bind();
 
 		GL_SelectTexture( INTERACTION_TEXUNIT_PROJECTION );
-#if defined( USE_VULKAN )
-		globalImages->whiteImage->Bind();
-#else
-		if( !r_useSSAO.GetBool() || ( viewDef->renderView.rdflags & ( RDF_NOAMBIENT | RDF_IRRADIANCE ) ) )
+if( glConfig.driverType == GLDRV_VULKAN )
+		{
+			globalImages->whiteImage->Bind();
+		}
+		else if( !r_useSSAO.GetBool() || ( viewDef->renderView.rdflags & ( RDF_NOAMBIENT | RDF_IRRADIANCE ) ) )
 		{
 			globalImages->whiteImage->Bind();
 		}
@@ -1503,7 +1494,6 @@ void idRenderBackend::DrawSingleInteraction( drawInteraction_t* din, bool useFas
 		{
 			globalImages->ambientOcclusionImage[0]->Bind();
 		}
-#endif
 
 		GL_SelectTexture( INTERACTION_TEXUNIT_AMBIENT_CUBE1 );
 		viewDef->irradianceImage->Bind();
@@ -2195,12 +2185,10 @@ void idRenderBackend::AmbientPass( const drawSurf_t* const* drawSurfs, int numDr
 		return;
 	}
 
-#if defined( USE_VULKAN )
-	if( fillGbuffer )
+	if( glConfig.driverType == GLDRV_VULKAN && fillGbuffer )
 	{
 		return;
 	}
-#endif
 
 
 	/*

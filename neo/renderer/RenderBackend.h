@@ -36,6 +36,12 @@ If you have questions concerning this license or the applicable additional terms
 #include "FrameData.h"
 
 bool			GL_CheckErrors_( const char* filename, int line );
+
+// texture unit assignments differ between the backends, defined in the backend impl files
+extern const int INTERACTION_TEXUNIT_AMBIENT_CUBE1;
+extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE1;
+extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE2;
+extern const int INTERACTION_TEXUNIT_SPECULAR_CUBE3;
 #if 1 // !defined(RETAIL)
 	#define         GL_CheckErrors()	GL_CheckErrors_(__FILE__, __LINE__)
 #else
