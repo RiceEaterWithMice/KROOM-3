@@ -583,3 +583,6 @@ void idRenderBackend::ResizeImages()
 {
 	// TODO resize framebuffers here
 }
+
+// no backend render program context setup needed for OpenGL
+void RP_InitBackendContext() {}

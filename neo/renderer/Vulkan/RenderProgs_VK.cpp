@@ -154,6 +154,27 @@ void CreateDescriptorPools( VkDescriptorPool( &pools )[ NUM_FRAME_DATA ] )
 	}
 }
 
+// backend specific render program context setup, called from the shared constructor
+void RP_InitBackendContext()
+{
+	vkRenderProgContext.counter = 0;
+
+	// Create Vertex Descriptions
+	CreateVertexDescriptions();
+
+	// Create Descriptor Pools
+	CreateDescriptorPools( vkRenderProgContext.descriptorPools );
+
+	for( int i = 0; i < NUM_FRAME_DATA; ++i )
+	{
+		vkRenderProgContext.parmBuffers[ i ] = new idUniformBuffer();
+		vkRenderProgContext.parmBuffers[ i ]->AllocBufferObject( NULL, MAX_DESC_SETS * MAX_DESC_SET_UNIFORMS * sizeof( idVec4 ), BU_DYNAMIC );
+	}
+
+	// Placeholder: mainly for optionalSkinning
+	emptyUBO.AllocBufferObject( NULL, sizeof( idVec4 ), BU_DYNAMIC );
+}
+
 /*
 ========================
 GetDescriptorType
@@ -215,7 +236,7 @@ void idRenderProgManager::CreateDescriptorSetLayout( const shader_t& vertexShade
 		createInfo.bindingCount = layoutBindings.Num();
 		createInfo.pBindings = layoutBindings.Ptr();
 
-		vkCreateDescriptorSetLayout( vkcontext.device, &createInfo, NULL, &renderProg.descriptorSetLayout );
+		vkCreateDescriptorSetLayout( vkcontext.device, &createInfo, NULL, ( VkDescriptorSetLayout* )&renderProg.descriptorSetLayout );
 	}
 
 	// Pipeline Layout
@@ -223,9 +244,9 @@ void idRenderProgManager::CreateDescriptorSetLayout( const shader_t& vertexShade
 		VkPipelineLayoutCreateInfo createInfo = {};
 		createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		createInfo.setLayoutCount = 1;
-		createInfo.pSetLayouts = &renderProg.descriptorSetLayout;
+		createInfo.pSetLayouts = ( VkDescriptorSetLayout* )&renderProg.descriptorSetLayout;
 
-		vkCreatePipelineLayout( vkcontext.device, &createInfo, NULL, &renderProg.pipelineLayout );
+		vkCreatePipelineLayout( vkcontext.device, &createInfo, NULL, ( VkPipelineLayout* )&renderProg.pipelineLayout );
 	}
 }
 
@@ -278,7 +299,7 @@ idRenderProgManager::LoadShader
 */
 void idRenderProgManager::LoadShader( int index, rpStage_t stage )
 {
-	if( shaders[ index ].module != VK_NULL_HANDLE )
+	if( shaders[ index ].module != 0 )
 	{
 		return; // Already loaded
 	}
@@ -551,7 +572,7 @@ void idRenderProgManager::LoadShader( shader_t& shader )
 	shaderModuleCreateInfo.codeSize = spirvLen;
 	shaderModuleCreateInfo.pCode = ( uint32* )spirvBuffer;
 
-	ID_VK_CHECK( vkCreateShaderModule( vkcontext.device, &shaderModuleCreateInfo, NULL, &shader.module ) );
+	ID_VK_CHECK( vkCreateShaderModule( vkcontext.device, &shaderModuleCreateInfo, NULL, ( VkShaderModule* )&shader.module ) );
 
 	Mem_Free( spirvBuffer );
 }
@@ -608,8 +629,8 @@ void idRenderProgManager::KillAllShaders()
 	for( int i = 0; i < shaders.Num(); ++i )
 	{
 		shader_t& shader = shaders[ i ];
-		vkDestroyShaderModule( vkcontext.device, shader.module, NULL );
-		shader.module = VK_NULL_HANDLE;
+		vkDestroyShaderModule( vkcontext.device, ( VkShaderModule )shader.module, NULL );
+		shader.module = 0;
 	}
 
 	// destroy pipelines
@@ -619,12 +640,12 @@ void idRenderProgManager::KillAllShaders()
 
 		for( int j = 0; j < prog.pipelines.Num(); ++j )
 		{
-			vkDestroyPipeline( vkcontext.device, prog.pipelines[ j ].pipeline, NULL );
+			vkDestroyPipeline( vkcontext.device, ( VkPipeline )prog.pipelines[ j ].pipeline, NULL );
 		}
 		prog.pipelines.Clear();
 
-		vkDestroyDescriptorSetLayout( vkcontext.device, prog.descriptorSetLayout, NULL );
-		vkDestroyPipelineLayout( vkcontext.device, prog.pipelineLayout, NULL );
+		vkDestroyDescriptorSetLayout( vkcontext.device, ( VkDescriptorSetLayout )prog.descriptorSetLayout, NULL );
+		vkDestroyPipelineLayout( vkcontext.device, ( VkPipelineLayout )prog.pipelineLayout, NULL );
 	}
 	renderProgs.Clear();
 
@@ -1043,14 +1064,14 @@ static VkPipeline CreateGraphicsPipeline(
 	stage.pName = "main";
 
 	{
-		stage.module = vertexShader;
+		stage.module = ( VkShaderModule )vertexShader;
 		stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
 		stages.Append( stage );
 	}
 
 	if( fragmentShader != VK_NULL_HANDLE )
 	{
-		stage.module = fragmentShader;
+		stage.module = ( VkShaderModule )fragmentShader;
 		stage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 		stages.Append( stage );
 	}
@@ -1109,7 +1130,7 @@ static VkPipeline CreateGraphicsPipeline(
 renderProg_t::GetPipeline
 ========================
 */
-VkPipeline idRenderProgManager::renderProg_t::GetPipeline( uint64 stateBits, VkShaderModule vertexShader, VkShaderModule fragmentShader )
+uint64 idRenderProgManager::renderProg_t::GetPipeline( uint64 stateBits, uint64 vertexShader, uint64 fragmentShader )
 {
 	for( int i = 0; i < pipelines.Num(); ++i )
 	{
@@ -1119,14 +1140,14 @@ VkPipeline idRenderProgManager::renderProg_t::GetPipeline( uint64 stateBits, VkS
 		}
 	}
 
-	VkPipeline pipeline = CreateGraphicsPipeline( vertexLayout, vertexShader, fragmentShader, pipelineLayout, stateBits );
+	VkPipeline pipeline = CreateGraphicsPipeline( vertexLayout, ( VkShaderModule )vertexShader, ( VkShaderModule )fragmentShader, ( VkPipelineLayout )pipelineLayout, stateBits );
 
 	pipelineState_t pipelineState;
-	pipelineState.pipeline = pipeline;
+	pipelineState.pipeline = ( uint64 )pipeline;
 	pipelineState.stateBits = stateBits;
 	pipelines.Append( pipelineState );
 
-	return pipeline;
+	return ( uint64 )pipeline;
 }
 
 /*
@@ -1186,14 +1207,14 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 
 	renderProg_t& prog = renderProgs[ current ];
 
-	VkPipeline pipeline = prog.GetPipeline( stateBits, shaders[ prog.vertexShaderIndex ].module, shaders[ prog.fragmentShaderIndex ].module );
+	VkPipeline pipeline = ( VkPipeline )prog.GetPipeline( stateBits, shaders[ prog.vertexShaderIndex ].module, shaders[ prog.fragmentShaderIndex ].module );
 
 	VkDescriptorSetAllocateInfo setAllocInfo = {};
 	setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	setAllocInfo.pNext = NULL;
 	setAllocInfo.descriptorPool = vkRenderProgContext.descriptorPools[ vkRenderProgContext.currentData ];
 	setAllocInfo.descriptorSetCount = 1;
-	setAllocInfo.pSetLayouts = &prog.descriptorSetLayout;
+	setAllocInfo.pSetLayouts = ( VkDescriptorSetLayout* )&prog.descriptorSetLayout;
 
 	ID_VK_CHECK( vkAllocateDescriptorSets( vkcontext.device, &setAllocInfo, &vkRenderProgContext.descriptorSets[ vkRenderProgContext.currentData ][ vkRenderProgContext.currentDescSet ] ) );
 
@@ -1304,7 +1325,7 @@ void idRenderProgManager::CommitUniforms( uint64 stateBits )
 	vkCmdBindDescriptorSets(
 		vkcontext.commandBuffer[ vkcontext.frameParity ],
 		VK_PIPELINE_BIND_POINT_GRAPHICS,
-		prog.pipelineLayout, 0, 1, &descSet,
+		( VkPipelineLayout )prog.pipelineLayout, 0, 1, &descSet,
 		0, NULL );
 
 	vkCmdBindPipeline(
@@ -1344,7 +1365,7 @@ void idRenderProgManager::ClearPipelines()
 		renderProg_t& prog = renderProgManager.renderProgs[ i ];
 		for( int j = 0; j < prog.pipelines.Num(); ++j )
 		{
-			vkDestroyPipeline( vkcontext.device, prog.pipelines[ j ].pipeline, NULL );
+			vkDestroyPipeline( vkcontext.device, ( VkPipeline )prog.pipelines[ j ].pipeline, NULL );
 		}
 		prog.pipelines.Clear();
 	}
