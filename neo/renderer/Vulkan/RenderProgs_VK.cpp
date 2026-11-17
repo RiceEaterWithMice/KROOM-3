@@ -34,6 +34,9 @@ If you have questions concerning this license or the applicable additional terms
 #include "../RenderCommon.h"
 #include "../RenderProgs.h"
 
+// definition for the Vulkan-side render program state declared in RenderBackend.h
+vkRenderProgContext_t vkRenderProgContext;
+
 
 void RpPrintState( uint64 stateBits );
 
